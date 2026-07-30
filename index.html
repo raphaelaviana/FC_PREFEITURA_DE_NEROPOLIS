@@ -281,22 +281,20 @@
             }
         }
 
-        function processarArquivo(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const data = new Uint8Array(e.target.result);
-                const workbook = XLSX.read(data, { type: 'array' });
-                const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-                const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-
-                guardarELerDadosExcel(jsonData);
-                document.getElementById('infoStatus').textContent = `Planilha '${file.name}' carregada com sucesso!`;
-            };
-            reader.readAsArrayBuffer(file);
-        }
+        async function processarArquivo() {
+const SHEET_ID='15Ng1oHMjpN7Yu_Re-teK_HaTq1nS7oLs';
+const GID='1863214707';
+const r=await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&gid=${GID}`);
+const t=await r.text();
+const j=JSON.parse(t.substring(47).slice(0,-2));
+const rows=[];
+rows.push(j.table.cols.map(c=>c.label||''));
+j.table.rows.forEach(rr=>rows.push((rr.c||[]).map(c=>c?c.v:'')));
+guardarELerDadosExcel(rows);
+const s=document.getElementById('infoStatus');
+if(s) s.textContent='Dados carregados do Google Sheets';
+}
+window.addEventListener('load',processarArquivo);
 
         function guardarELerDadosExcel(rows) {
             if (!rows || rows.length < 2) return;
