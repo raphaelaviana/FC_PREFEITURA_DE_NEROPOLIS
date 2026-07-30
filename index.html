@@ -426,7 +426,7 @@
                 const key = item.SUB_ELEMENTO || item.DESDOBRAMENTO || 'Desdobramentos Gerais';
                 if (!grouped[key]) grouped[key] = [];
                 grouped[key].push(item);
-                totalAmount += (Number(item.DEBITO) || Number(item.CREDITO) || 0);
+                totalAmount += (Number(item["SALDO FINAL"]) || 0);
             });
 
             document.getElementById('drawerTotal').innerText = `Total: R$ ${totalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
@@ -444,7 +444,7 @@
             } else {
                 Object.keys(grouped).forEach((subGroupKey, index) => {
                     const items = grouped[subGroupKey];
-                    const subTotal = items.reduce((a, b) => a + (Number(b.DEBITO) || Number(b.CREDITO) || 0), 0);
+                    const subTotal = items.reduce((a, b) => a + (Number(b["SALDO FINAL"]) || 0), 0);
 
                     const groupCard = document.createElement('div');
                     groupCard.className = 'border border-slate-200/80 rounded-xl overflow-hidden bg-white shadow-sm hover:shadow-md transition';
