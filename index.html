@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Prefeitura Municipal de Nerópolis - Demonstrativo Financeiro por Fundo</title>
-    <script type="text/javascript" src="https://gc.kis.v2.scr.kaspersky-labs.com/FD126C42-EBFA-4E12-B309-BB3FDD723AC1/main.js?attr=dOgD753-TMatqV15UPvKYjtnVXQe8GFWATWN1Ex9yJ1v_OCqFeMWn4eJ8CyatUQVuJJ6_qPSOILfTCs3mitXrBv_nkvA5wbJ1dXFkwjommrKGM2oAPPjjuxpEIqY6Tx420EndF1ZHWFqxxKn4MiYl9FLLlCIDmA3347OavC17GBiII3rTDDHk8Sdz4oq2Udu5QmlHZnXFHfwbCfA17Y9YtFt2eBkc8dtBLtzV4JwoOT0n9pVAS8aRBWbOr3tq00PE9tuKqGce4yI-2k_4NzdNUK8Ml30SCH0BjvzZW0BREouu3Q4lEmBx7s3NMA6IsMo5vRY2vmsf8VMWnfYhkWWeg" charset="UTF-8"></script><link rel="stylesheet" crossorigin="anonymous" href="https://gc.kis.v2.scr.kaspersky-labs.com/E3E8934C-235A-4B0E-825A-35A08381A191/abn/main.css?attr=aHR0cHM6Ly9jaGF0Z3B0LmNvbS9iYWNrZW5kLWFwaS9lc3R1YXJ5L2NvbnRlbnQ_aWQ9ZmlsZV8wMDAwMDAwMDcyOTQ4MjBlOGM3OWFlMTY2MTk1NTc3ZSZmbj1QUkVGRUlUVVJBX3NlbV9yb2RhcGUuaHRtbCZjZD1hdHRhY2htZW50JnRzPTQ5NTk1MyZwPWZzJmNpZD0xJnNpZz02ZTkxOTQzNzhhZjEyNjUwOWExZjc3YjI3MzFlMTk3M2U1Y2UwMWU1MDE5NDUzMTY2MGRjMzlhMzAwOTM4NjE4JnY9MA"/><script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
     <!-- SheetJS (xlsx) para leitura de arquivos Excel/CSV -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <!-- Lucide Icons -->
@@ -103,6 +103,24 @@
         ::-webkit-scrollbar-thumb {
             background: #94a3b8;
             border-radius: 3px;
+        }
+
+        .cel-clicavel {
+            cursor: pointer;
+            transition: background-color 0.15s ease;
+        }
+
+        .cel-clicavel:hover {
+            background-color: #fff7ed;
+            box-shadow: inset 0 0 0 1px #fdba74;
+        }
+
+        #painelConteudo table {
+            border-collapse: collapse;
+        }
+
+        .painel-grupo-row:hover {
+            background-color: #f8fafc;
         }
     </style>
 </head>
@@ -204,8 +222,29 @@
 
     </main>
 
+    <!-- Overlay do Painel Lateral -->
+    <div id="painelOverlay" class="hidden fixed inset-0 bg-slate-900/50 z-40 transition-opacity duration-300" onclick="fecharPainel()"></div>
+
+    <!-- Painel Lateral (Drawer) de Detalhamento Analítico -->
+    <aside id="painelLateral" class="fixed top-0 right-0 h-full w-full sm:w-[440px] bg-white shadow-2xl z-50 transform translate-x-full transition-transform duration-300 ease-out flex flex-col">
+        <div class="bg-[#1b365d] text-white px-5 py-4 border-b-4 border-[#e65100] shrink-0">
+            <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                    <h2 id="painelTitulo" class="text-base font-bold leading-tight truncate"></h2>
+                    <p id="painelSubtitulo" class="text-xs text-blue-200 mt-1"></p>
+                </div>
+                <button onclick="fecharPainel()" class="text-blue-200 hover:text-white transition shrink-0" title="Fechar">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <div id="painelBreadcrumb" class="text-xs mt-3 flex flex-wrap items-center gap-0.5"></div>
+        </div>
+        <div id="painelConteudo" class="flex-1 overflow-y-auto p-4 bg-white"></div>
+    </aside>
     <script>
         lucide.createIcons();
+
+        const MESES_NOMES = ['JANEIRO', 'FEVEREIRO', 'MARÇO', 'ABRIL', 'MAIO', 'JUNHO', 'JULHO', 'AGOSTO', 'SETEMBRO', 'OUTUBRO', 'NOVEMBRO', 'DEZEMBRO'];
 
         // Estrutura Base DRE
         const estruturaBase = [
@@ -273,7 +312,7 @@
                 return '<span class="text-slate-400">-</span>';
             }
             const formatado = Math.abs(num).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-            
+
             if (num < 0) {
                 return `<span class="num-negativo">(${formatado})</span>`;
             } else {
@@ -281,49 +320,79 @@
             }
         }
 
+        function escapeHtml(str) {
+            return String(str === null || str === undefined ? '' : str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        function normalizarTexto(s) {
+            return String(s || '')
+                .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                .trim().toUpperCase();
+        }
+
+        function localizarColuna(headerNorm, exatos, parciais) {
+            for (const alvo of exatos) {
+                const idx = headerNorm.indexOf(alvo);
+                if (idx >= 0) return idx;
+            }
+            if (parciais) {
+                for (const alvo of parciais) {
+                    const idx = headerNorm.findIndex(h => h.includes(alvo));
+                    if (idx >= 0) return idx;
+                }
+            }
+            return -1;
+        }
+
+        function parseCelulaData(valor) {
+            if (valor === null || valor === undefined || valor === '') {
+                return { texto: '-', ord: 0 };
+            }
+            if (typeof valor === 'string' && valor.startsWith('Date(')) {
+                const partes = valor.substring(5, valor.length - 1).split(',').map(Number);
+                const d = new Date(partes[0], partes[1] || 0, partes[2] || 1);
+                return { texto: d.toLocaleDateString('pt-BR'), ord: d.getTime() };
+            }
+            if (valor instanceof Date) {
+                return { texto: valor.toLocaleDateString('pt-BR'), ord: valor.getTime() };
+            }
+            return { texto: String(valor), ord: 0 };
+        }
+
         async function processarArquivo() {
-const SHEET_ID='15Ng1oHMjpN7Yu_Re-teK_HaTq1nS7oLs';
-const GID='1863214707';
-const r=await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&gid=${GID}`);
-const t=await r.text();
-const j=JSON.parse(t.substring(47).slice(0,-2));
-const rows=[];
-rows.push(j.table.cols.map(c=>c.label||''));
-j.table.rows.forEach(rr=>rows.push((rr.c||[]).map(c=>c?c.v:'')));
-guardarELerDadosExcel(rows);
-const s=document.getElementById('infoStatus');
-if(s) s.textContent='Dados carregados do Google Sheets';
-}
-window.addEventListener('load',processarArquivo);
+            const SHEET_ID = '15Ng1oHMjpN7Yu_Re-teK_HaTq1nS7oLs';
+            const GID = '1863214707';
+            const r = await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&gid=${GID}`);
+            const t = await r.text();
+            const j = JSON.parse(t.substring(47).slice(0, -2));
+            const rows = [];
+            rows.push(j.table.cols.map(c => c.label || ''));
+            j.table.rows.forEach(rr => rows.push((rr.c || []).map(c => c ? c.v : '')));
+            guardarELerDadosExcel(rows);
+            const s = document.getElementById('infoStatus');
+            if (s) s.textContent = 'Dados carregados do Google Sheets';
+        }
+        window.addEventListener('load', processarArquivo);
 
         function guardarELerDadosExcel(rows) {
             if (!rows || rows.length < 2) return;
 
-            let colClassificacao = -1;
-            let colSaldoFinal = -1;
-            let colMes = -1;
-            let colFundo = -1;
-            let colAno = -1;
+            const headerNorm = rows[0].map(normalizarTexto);
 
-            const headerRow = rows[0].map(c => String(c || '').trim().toUpperCase());
-
-            headerRow.forEach((colName, idx) => {
-                if (colName.includes('CLASSIFICAÇÃO') || colName.includes('CLASSIFICACAO') || colName.includes('CONTA') || colName.includes('CATEGORIA')) {
-                    colClassificacao = idx;
-                }
-                if (colName.includes('SALDO FINAL') || colName.includes('SALDO') || colName.includes('VALOR')) {
-                    colSaldoFinal = idx;
-                }
-                if (colName.includes('MÊS') || colName.includes('MES') || colName.includes('DATA')) {
-                    colMes = idx;
-                }
-                if (colName.includes('FUNDO') || colName.includes('UNIDADE') || colName.includes('ENTIDADE')) {
-                    colFundo = idx;
-                }
-                if (colName.includes('ANO') || colName.includes('EXERCICIO')) {
-                    colAno = idx;
-                }
-            });
+            const colClassificacao = localizarColuna(headerNorm, ['CLASSIFICACAO FINAL'], ['CLASSIFICACAO', 'CONTA', 'CATEGORIA']);
+            const colSaldoFinal = localizarColuna(headerNorm, ['SALDO FINAL'], ['SALDO', 'VALOR']);
+            const colMes = localizarColuna(headerNorm, ['MES'], ['EXERCICIO']);
+            const colData = localizarColuna(headerNorm, ['DATA'], []);
+            const colFundo = localizarColuna(headerNorm, ['FUNDO'], ['UNIDADE', 'ENTIDADE']);
+            const colAno = localizarColuna(headerNorm, ['ANO'], []);
+            const colDescricao = localizarColuna(headerNorm, ['DESCRICAO'], []);
+            const colTcm = localizarColuna(headerNorm, ['TCM'], []);
+            const colEnte = localizarColuna(headerNorm, ['ENTE'], []);
+            const colSegReceita = localizarColuna(headerNorm, ['SEGREGACAO DE RECEITA'], []);
 
             registrosBrutosExcel = [];
 
@@ -333,8 +402,12 @@ window.addEventListener('load',processarArquivo);
                 const classif = String(row[colClassificacao >= 0 ? colClassificacao : 0] || '').trim().toUpperCase();
                 const saldo = parseNumero(row[colSaldoFinal >= 0 ? colSaldoFinal : 1]);
                 const fundo = colFundo >= 0 ? String(row[colFundo] || '').trim().toUpperCase() : 'EXECUTIVO';
-                const ano = colAno >= 0 ? String(row[colAno] || '').trim() : '2026';
-                
+
+                const infoData = colData >= 0 ? parseCelulaData(row[colData]) : { texto: '-', ord: 0 };
+                const ano = colAno >= 0
+                    ? String(row[colAno] || '').trim()
+                    : (infoData.ord ? String(new Date(infoData.ord).getFullYear()) : '2026');
+
                 let mesIdx = 0;
                 if (colMes >= 0) {
                     mesIdx = identificarMes(String(row[colMes]).trim().toUpperCase());
@@ -345,7 +418,13 @@ window.addEventListener('load',processarArquivo);
                     saldo: saldo,
                     fundo: fundo,
                     ano: ano,
-                    mesIdx: mesIdx
+                    mesIdx: mesIdx,
+                    descricao: colDescricao >= 0 ? String(row[colDescricao] || '').trim() : '',
+                    tcm: colTcm >= 0 ? String(row[colTcm] || '').trim() : '',
+                    ente: colEnte >= 0 ? String(row[colEnte] || '').trim() : '',
+                    segReceita: colSegReceita >= 0 ? String(row[colSegReceita] || '').trim() : '',
+                    dataFormatada: infoData.texto,
+                    dataOrd: infoData.ord
                 });
             });
 
@@ -353,6 +432,8 @@ window.addEventListener('load',processarArquivo);
         }
 
         function recalcularEFiltrar() {
+            fecharPainel();
+
             const fundoSelecionado = document.getElementById('selectFundo').value.toUpperCase();
             const anoSelecionado = document.getElementById('selectAno').value.toUpperCase();
 
@@ -379,12 +460,12 @@ window.addEventListener('load',processarArquivo);
                         const classifUpper = reg.classificacao;
                         const filhoUpper = filho.descricao.toUpperCase();
 
-                        if (filhoUpper === 'RECEITA PRÓPRIA' && 
-                            (classifUpper.includes('RECEITA PRÓPRIA') || classifUpper.includes('RECEITA PROPRIA') || 
-                             classifUpper.includes('UNIÃO') || classifUpper.includes('UNIAO') || 
+                        if (filhoUpper === 'RECEITA PRÓPRIA' &&
+                            (classifUpper.includes('RECEITA PRÓPRIA') || classifUpper.includes('RECEITA PROPRIA') ||
+                             classifUpper.includes('UNIÃO') || classifUpper.includes('UNIAO') ||
                              classifUpper.includes('ESTADO') || classifUpper.includes('MUNICÍPIO') || classifUpper.includes('MUNICIPIO'))) {
                             filho.valores[reg.mesIdx] += reg.saldo;
-                        } 
+                        }
                         else if (classifUpper === filhoUpper || classifUpper.includes(filhoUpper)) {
                             filho.valores[reg.mesIdx] += reg.saldo;
                         }
@@ -393,7 +474,15 @@ window.addEventListener('load',processarArquivo);
             });
 
             renderizarTabela(dadosFiltrados, fundoSelecionado);
-            document.getElementById('infoStatus').textContent = `Filtrado por: FUNDO = '${fundoSelecionado}', ANO = '${anoSelecionado}'`;
+            const statusEl = document.getElementById('infoStatus');
+            if (statusEl) statusEl.textContent = `Filtrado por: FUNDO = '${fundoSelecionado}', ANO = '${anoSelecionado}'`;
+        }
+
+        function podeAbrirPainel(catDescricao, filhoDescricao) {
+            if (catDescricao === 'REPASSES') return false;
+            const filhoUpper = filhoDescricao.toUpperCase();
+            if (filhoUpper === 'RECEITA DE REPASSE' || filhoUpper === 'ESTORNOS') return false;
+            return true;
         }
 
         function renderizarTabela(dados, fundoSelecionado) {
@@ -413,7 +502,6 @@ window.addEventListener('load',processarArquivo);
                     }
                 });
 
-                // Soma direta para os totais do mês
                 if (exibeRepasses) {
                     for (let m = 0; m < 12; m++) {
                         somaTotalMatematica[m] += cat.valores[m];
@@ -438,13 +526,36 @@ window.addEventListener('load',processarArquivo);
                     trFilho.className = 'row-item';
 
                     const totalFilho = exibeRepasses ? filho.valores.reduce((a, b) => a + b, 0) : 0;
-                    let filhoHtml = `<td class="font-medium">${filho.descricao}</td>`;
+                    const podeAbrir = exibeRepasses && podeAbrirPainel(cat.descricao, filho.descricao);
+
+                    const tdDesc = document.createElement('td');
+                    tdDesc.className = 'font-medium';
+                    tdDesc.textContent = filho.descricao;
+                    trFilho.appendChild(tdDesc);
+
                     for (let m = 0; m < 12; m++) {
                         let val = exibeRepasses ? filho.valores[m] : 0;
-                        filhoHtml += `<td class="val-col">${formatarValor(val)}</td>`;
+                        const td = document.createElement('td');
+                        td.className = 'val-col';
+                        td.innerHTML = formatarValor(val);
+                        if (podeAbrir) {
+                            td.classList.add('cel-clicavel');
+                            td.title = `Ver analítico de ${filho.descricao} em ${MESES_NOMES[m]}`;
+                            td.addEventListener('click', () => abrirPainel(cat.descricao, filho.descricao, m));
+                        }
+                        trFilho.appendChild(td);
                     }
-                    filhoHtml += `<td class="val-col font-semibold text-slate-800">${formatarValor(totalFilho)}</td>`;
-                    trFilho.innerHTML = filhoHtml;
+
+                    const tdTotal = document.createElement('td');
+                    tdTotal.className = 'val-col font-semibold text-slate-800';
+                    tdTotal.innerHTML = formatarValor(totalFilho);
+                    if (podeAbrir) {
+                        tdTotal.classList.add('cel-clicavel');
+                        tdTotal.title = `Ver analítico de ${filho.descricao} no ano`;
+                        tdTotal.addEventListener('click', () => abrirPainel(cat.descricao, filho.descricao, 'TOTAL'));
+                    }
+                    trFilho.appendChild(tdTotal);
+
                     tbody.appendChild(trFilho);
                 });
             });
@@ -453,7 +564,7 @@ window.addEventListener('load',processarArquivo);
             let trResultado = document.createElement('tr');
             trResultado.className = 'row-resultado';
             let resHtml = `<td>SUPERÁVIT/DÉFICIT</td>`;
-            
+
             let superavitTotalGeral = 0;
             for (let m = 0; m < 12; m++) {
                 let saldoMes = somaTotalMatematica[m];
@@ -479,6 +590,215 @@ window.addEventListener('load',processarArquivo);
             let str = String(val).replace(/[R$\s]/g, '').replace(/\./g, '').replace(',', '.');
             return parseFloat(str) || 0;
         }
+
+        /* ==================== PAINEL LATERAL DE DETALHAMENTO ANALÍTICO ==================== */
+
+        let painelStack = [];
+        let painelNiveis = [];
+        let painelInfo = {};
+
+        const CAMPO_POR_NIVEL = { tcm: 'tcm', ente: 'ente', tipo: 'segReceita' };
+
+        function registrosParaFilho(catDescricao, filhoDescricao, fundoSelecionado, anoSelecionado, mesIdx) {
+            const filhoUpper = filhoDescricao.toUpperCase();
+            return registrosBrutosExcel.filter(reg => {
+                if (anoSelecionado !== 'TODOS' && reg.ano !== anoSelecionado) return false;
+
+                const fundoReg = reg.fundo;
+                const correspondeFundo = (fundoSelecionado === 'EXECUTIVO' && (fundoReg.includes('EXECUTIVO') || fundoReg === 'PREFEITURA')) ||
+                                         fundoReg.includes(fundoSelecionado);
+                if (!correspondeFundo && fundoSelecionado !== 'TODOS') return false;
+
+                if (mesIdx !== 'TOTAL' && reg.mesIdx !== mesIdx) return false;
+
+                const classifUpper = reg.classificacao;
+                if (filhoUpper === 'RECEITA PRÓPRIA') {
+                    return classifUpper.includes('RECEITA PRÓPRIA') || classifUpper.includes('RECEITA PROPRIA') ||
+                           classifUpper.includes('UNIÃO') || classifUpper.includes('UNIAO') ||
+                           classifUpper.includes('ESTADO') || classifUpper.includes('MUNICÍPIO') || classifUpper.includes('MUNICIPIO');
+                }
+                return classifUpper === filhoUpper || classifUpper.includes(filhoUpper);
+            });
+        }
+
+        function determinarNiveis(filhoDescricao, fundoSelecionado) {
+            if (filhoDescricao.toUpperCase() === 'RECEITA PRÓPRIA') {
+                return fundoSelecionado === 'EXECUTIVO' ? ['ente', 'tipo', 'transacoes'] : ['tipo', 'transacoes'];
+            }
+            return ['tcm', 'transacoes'];
+        }
+
+        function agruparPorCampo(registros, campo) {
+            const mapa = new Map();
+            registros.forEach(r => {
+                const chave = (r[campo] && String(r[campo]).trim()) || 'NÃO CLASSIFICADO';
+                if (!mapa.has(chave)) {
+                    mapa.set(chave, { label: chave, total: 0, records: [] });
+                }
+                const g = mapa.get(chave);
+                g.total += r.saldo;
+                g.records.push(r);
+            });
+            return Array.from(mapa.values()).sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
+        }
+
+        function abrirPainel(catDescricao, filhoDescricao, mesIdx) {
+            const fundoSelecionado = document.getElementById('selectFundo').value.toUpperCase();
+            const anoSelecionado = document.getElementById('selectAno').value.toUpperCase();
+            const registros = registrosParaFilho(catDescricao, filhoDescricao, fundoSelecionado, anoSelecionado, mesIdx);
+
+            painelNiveis = determinarNiveis(filhoDescricao, fundoSelecionado);
+            painelInfo = { filhoDescricao, fundoSelecionado, anoSelecionado, mesIdx };
+            painelStack = [];
+
+            entrarNivel(registros, 0, filhoDescricao);
+
+            const overlay = document.getElementById('painelOverlay');
+            const painel = document.getElementById('painelLateral');
+            overlay.classList.remove('hidden');
+            requestAnimationFrame(() => {
+                painel.classList.remove('translate-x-full');
+            });
+        }
+
+        function entrarNivel(registros, nivelIndex, breadcrumbLabel) {
+            const tipoNivel = painelNiveis[nivelIndex];
+            let entry;
+            if (!tipoNivel || tipoNivel === 'transacoes') {
+                entry = {
+                    breadcrumbLabel,
+                    tipo: 'transacoes',
+                    registros: [...registros].sort((a, b) => (a.dataOrd || 0) - (b.dataOrd || 0))
+                };
+            } else {
+                const campo = CAMPO_POR_NIVEL[tipoNivel];
+                entry = {
+                    breadcrumbLabel,
+                    tipo: 'grupos',
+                    nivelIndex,
+                    grupos: agruparPorCampo(registros, campo)
+                };
+            }
+            painelStack.push(entry);
+            renderPainel();
+        }
+
+        function avancarGrupo(nivelIndex, grupoIdx) {
+            const entryAtual = painelStack[painelStack.length - 1];
+            const grupo = entryAtual.grupos[grupoIdx];
+            entrarNivel(grupo.records, nivelIndex + 1, grupo.label);
+        }
+
+        function voltarPainelNivel(indexAlvo) {
+            painelStack = painelStack.slice(0, indexAlvo + 1);
+            renderPainel();
+        }
+
+        function fecharPainel() {
+            const overlay = document.getElementById('painelOverlay');
+            const painel = document.getElementById('painelLateral');
+            if (!painel || painel.classList.contains('translate-x-full')) return;
+            painel.classList.add('translate-x-full');
+            setTimeout(() => overlay.classList.add('hidden'), 300);
+        }
+
+        function renderPainel() {
+            const entryAtual = painelStack[painelStack.length - 1];
+
+            document.getElementById('painelTitulo').textContent = painelInfo.filhoDescricao;
+            const mesTexto = painelInfo.mesIdx === 'TOTAL' ? 'Total do ano' : MESES_NOMES[painelInfo.mesIdx];
+            const anoTexto = painelInfo.anoSelecionado !== 'TODOS' ? painelInfo.anoSelecionado : 'todos os anos';
+            document.getElementById('painelSubtitulo').textContent = `${painelInfo.fundoSelecionado} • ${mesTexto} • ${anoTexto}`;
+
+            const breadcrumbEl = document.getElementById('painelBreadcrumb');
+            breadcrumbEl.innerHTML = '';
+            painelStack.forEach((entry, idx) => {
+                const isLast = idx === painelStack.length - 1;
+                const span = document.createElement('span');
+                span.textContent = entry.breadcrumbLabel;
+                span.className = isLast ? 'font-bold text-white' : 'text-blue-200 cursor-pointer hover:underline';
+                if (!isLast) span.onclick = () => voltarPainelNivel(idx);
+                breadcrumbEl.appendChild(span);
+                if (!isLast) {
+                    const sep = document.createElement('span');
+                    sep.textContent = ' › ';
+                    sep.className = 'text-blue-300 mx-1';
+                    breadcrumbEl.appendChild(sep);
+                }
+            });
+
+            const contentEl = document.getElementById('painelConteudo');
+            contentEl.innerHTML = '';
+
+            if (entryAtual.tipo === 'grupos') {
+                if (entryAtual.grupos.length === 0) {
+                    contentEl.innerHTML = '<p class="text-slate-400 text-sm text-center py-10">Nenhum lançamento encontrado.</p>';
+                    return;
+                }
+                const totalGeral = entryAtual.grupos.reduce((s, g) => s + g.total, 0);
+                const table = document.createElement('table');
+                table.className = 'w-full text-sm';
+                const tbodyPainel = document.createElement('tbody');
+                entryAtual.grupos.forEach((g, idx) => {
+                    const tr = document.createElement('tr');
+                    tr.className = 'painel-grupo-row cursor-pointer border-b border-slate-100';
+                    tr.innerHTML = `
+                        <td class="py-2.5 px-3 text-slate-700 font-medium">${escapeHtml(g.label)}</td>
+                        <td class="py-2.5 px-3 text-right font-semibold whitespace-nowrap">${formatarValor(g.total)}</td>
+                        <td class="py-2.5 pl-1 pr-3 text-slate-300 w-6"><i data-lucide="chevron-right" class="w-4 h-4"></i></td>
+                    `;
+                    tr.addEventListener('click', () => avancarGrupo(entryAtual.nivelIndex, idx));
+                    tbodyPainel.appendChild(tr);
+                });
+                table.appendChild(tbodyPainel);
+                contentEl.appendChild(table);
+
+                const totalDiv = document.createElement('div');
+                totalDiv.className = 'mt-3 pt-3 border-t-2 border-slate-800 flex justify-between font-bold text-slate-900 px-3';
+                totalDiv.innerHTML = `<span>TOTAL</span><span>${formatarValor(totalGeral)}</span>`;
+                contentEl.appendChild(totalDiv);
+            } else {
+                if (entryAtual.registros.length === 0) {
+                    contentEl.innerHTML = '<p class="text-slate-400 text-sm text-center py-10">Nenhum lançamento encontrado.</p>';
+                    return;
+                }
+                let total = 0;
+                const table = document.createElement('table');
+                table.className = 'w-full text-xs';
+                table.innerHTML = `<thead>
+                    <tr class="text-left text-slate-500 border-b-2 border-slate-200">
+                        <th class="py-2 px-3 font-semibold">DATA</th>
+                        <th class="py-2 px-3 font-semibold">DESCRIÇÃO</th>
+                        <th class="py-2 px-3 font-semibold text-right">VALOR</th>
+                    </tr>
+                </thead>`;
+                const tbodyPainel = document.createElement('tbody');
+                entryAtual.registros.forEach(r => {
+                    total += r.saldo;
+                    const tr = document.createElement('tr');
+                    tr.className = 'border-b border-slate-100 hover:bg-slate-50';
+                    tr.innerHTML = `
+                        <td class="py-2 px-3 text-slate-500 whitespace-nowrap align-top">${escapeHtml(r.dataFormatada || '-')}</td>
+                        <td class="py-2 px-3 text-slate-700">${escapeHtml(r.descricao || '-')}</td>
+                        <td class="py-2 px-3 text-right font-medium whitespace-nowrap align-top">${formatarValor(r.saldo)}</td>
+                    `;
+                    tbodyPainel.appendChild(tr);
+                });
+                table.appendChild(tbodyPainel);
+                contentEl.appendChild(table);
+
+                const totalDiv = document.createElement('div');
+                totalDiv.className = 'mt-3 pt-3 border-t-2 border-slate-800 flex justify-between font-bold text-slate-900 px-3';
+                totalDiv.innerHTML = `<span>TOTAL (${entryAtual.registros.length} lançamento${entryAtual.registros.length === 1 ? '' : 's'})</span><span>${formatarValor(total)}</span>`;
+                contentEl.appendChild(totalDiv);
+            }
+
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') fecharPainel();
+        });
 
         recalcularEFiltrar();
     </script>
