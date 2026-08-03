@@ -1102,7 +1102,7 @@
         async function processarFolha() {
             const SHEET_ID_FOLHA = '1n87o_16uQEPSeAaxmJVRgx8-ygLb4pBf';
             try {
-                const r = await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID_FOLHA}/gviz/tq?tqx=out:json&gid=0`);
+                const r = await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID_FOLHA}/gviz/tq?tqx=out:json`);
                 if (!r.ok) {
                     throw new Error(`Falha HTTP ${r.status} ao buscar a planilha da folha. Verifique se ela está compartilhada como "Qualquer pessoa com o link pode visualizar".`);
                 }
@@ -1130,6 +1130,14 @@
             const colMes = localizarColuna(headerNorm, ['MES'], []);
             const colNome = localizarColuna(headerNorm, ['NOME'], []);
             const colSecretaria = localizarColuna(headerNorm, ['SECRETARIA'], []);
+
+            if (colFundo < 0 || colNome < 0) {
+                const colunasEncontradas = rows[0].map(v => String(v || '').trim()).filter(Boolean).join(', ') || '(nenhuma)';
+                erroFolha = `Não encontrei as colunas FUNDO e/ou NOME na planilha da folha. Colunas encontradas na primeira linha: ${colunasEncontradas}`;
+                registrosFolha = [];
+                atualizarIndicadores();
+                return;
+            }
 
             registrosFolha = [];
             const contagemRotulo = new Map();
