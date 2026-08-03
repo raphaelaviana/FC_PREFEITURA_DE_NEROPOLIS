@@ -561,10 +561,7 @@
                     ? String(row[colAno] || '').trim()
                     : (anoForcado || (infoData.ord ? String(new Date(infoData.ord).getFullYear()) : '2026'));
 
-                let mesIdx = 0;
-                if (colMes >= 0) {
-                    mesIdx = identificarMes(String(row[colMes]).trim().toUpperCase());
-                }
+                const mesIdx = resolverMesIdx(colMes >= 0 ? row[colMes] : null, infoData);
 
                 registrosBrutosExcel.push({
                     classificacao: classif,
@@ -740,6 +737,24 @@
             for (let i = 0; i < meses.length; i++) {
                 if (val.includes(meses[i]) || val == (i + 1)) return i;
             }
+            return -1;
+        }
+
+        // Resolve o índice do mês (0-11) a partir do valor bruto da coluna MÊS, cobrindo os
+        // formatos mais comuns: texto ("JANEIRO"/"JAN"), número (1-12) e data (quando a coluna
+        // MÊS foi digitada/formatada como data pelo Google Sheets, ex.: "Date(2025,0,1)"). Se
+        // nada for reconhecível, cai para o mês da coluna DATA, e por último para Janeiro.
+        function resolverMesIdx(valorMesBruto, infoData) {
+            if (valorMesBruto !== null && valorMesBruto !== undefined && valorMesBruto !== '') {
+                if (typeof valorMesBruto === 'string' && valorMesBruto.startsWith('Date(')) {
+                    const infoMes = parseCelulaData(valorMesBruto);
+                    if (infoMes.ord) return new Date(infoMes.ord).getMonth();
+                } else {
+                    const idx = identificarMes(String(valorMesBruto).trim().toUpperCase());
+                    if (idx >= 0) return idx;
+                }
+            }
+            if (infoData && infoData.ord) return new Date(infoData.ord).getMonth();
             return 0;
         }
 
@@ -1166,7 +1181,7 @@
                     const nome = colNome >= 0 ? String(row[colNome] || '').trim() : '';
                     if (!fundo || !nome) return;
 
-                    const mesIdx = colMes >= 0 ? identificarMes(String(row[colMes] || '').trim().toUpperCase()) : 0;
+                    const mesIdx = resolverMesIdx(colMes >= 0 ? row[colMes] : null, null);
                     const secretariaRaw = colSecretaria >= 0 ? String(row[colSecretaria] || '').trim() : '';
 
                     let secretariaCodigo = secretariaRaw;
