@@ -451,6 +451,30 @@
             return fundoReg.includes(fundoSelecionado);
         }
 
+        function parseRespostaGviz(t) {
+            const inicio = t.indexOf('{');
+            const fim = t.lastIndexOf('}');
+            if (inicio === -1 || fim === -1) {
+                throw new Error('Resposta inesperada do Google Sheets (a planilha pode estar privada, ter sido apagada, ou o link mudou).');
+            }
+            let jsonTexto = t.substring(inicio, fim + 1);
+            // O gviz às vezes emite "NaN" (token inválido em JSON) para células numéricas vazias
+            jsonTexto = jsonTexto.replace(/:\s*NaN\s*([,}])/g, ':null$1');
+
+            const j = JSON.parse(jsonTexto);
+            if (!j || !j.table) {
+                throw new Error('A planilha não retornou uma tabela válida.');
+            }
+
+            const rows = [];
+            rows.push((j.table.cols || []).map(c => (c && c.label) || ''));
+            (j.table.rows || []).forEach(rr => {
+                if (!rr) { rows.push([]); return; }
+                rows.push((rr.c || []).map(c => (c ? c.v : '')));
+            });
+            return rows;
+        }
+
         function parseCelulaData(valor) {
             if (valor === null || valor === undefined || valor === '') {
                 return { texto: '-', ord: 0 };
@@ -469,15 +493,21 @@
         async function processarArquivo() {
             const SHEET_ID = '15Ng1oHMjpN7Yu_Re-teK_HaTq1nS7oLs';
             const GID = '1863214707';
-            const r = await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&gid=${GID}`);
-            const t = await r.text();
-            const j = JSON.parse(t.substring(47).slice(0, -2));
-            const rows = [];
-            rows.push(j.table.cols.map(c => c.label || ''));
-            j.table.rows.forEach(rr => rows.push((rr.c || []).map(c => c ? c.v : '')));
-            guardarELerDadosExcel(rows);
-            const s = document.getElementById('infoStatus');
-            if (s) s.textContent = 'Dados carregados do Google Sheets';
+            try {
+                const r = await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&gid=${GID}`);
+                if (!r.ok) {
+                    throw new Error(`Falha HTTP ${r.status} ao buscar a planilha principal.`);
+                }
+                const t = await r.text();
+                const rows = parseRespostaGviz(t);
+                guardarELerDadosExcel(rows);
+                const s = document.getElementById('infoStatus');
+                if (s) s.textContent = 'Dados carregados do Google Sheets';
+            } catch (e) {
+                console.warn('Não foi possível carregar a planilha principal:', e);
+                const s = document.getElementById('infoStatus');
+                if (s) s.textContent = `Erro ao carregar dados da planilha principal: ${(e && e.message) || e}`;
+            }
         }
         window.addEventListener('load', () => {
             processarArquivo();
@@ -1067,24 +1097,33 @@
 
         let registrosFolha = [];
         let rotuloSecretariaPorCodigo = new Map();
+        let erroFolha = null;
 
         async function processarFolha() {
             const SHEET_ID_FOLHA = '1n87o_16uQEPSeAaxmJVRgx8-ygLb4pBf';
             try {
-                const r = await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID_FOLHA}/gviz/tq?tqx=out:json`);
+                const r = await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID_FOLHA}/gviz/tq?tqx=out:json&gid=0`);
+                if (!r.ok) {
+                    throw new Error(`Falha HTTP ${r.status} ao buscar a planilha da folha. Verifique se ela está compartilhada como "Qualquer pessoa com o link pode visualizar".`);
+                }
                 const t = await r.text();
-                const j = JSON.parse(t.substring(47).slice(0, -2));
-                const rows = [];
-                rows.push(j.table.cols.map(c => c.label || ''));
-                j.table.rows.forEach(rr => rows.push((rr.c || []).map(c => c ? c.v : '')));
+                const rows = parseRespostaGviz(t);
                 guardarELerDadosFolha(rows);
             } catch (e) {
                 console.warn('Não foi possível carregar a folha de pagamento:', e);
+                erroFolha = String((e && e.message) || e);
+                atualizarIndicadores();
             }
         }
 
         function guardarELerDadosFolha(rows) {
-            if (!rows || rows.length < 2) return;
+            erroFolha = null;
+
+            if (!rows || rows.length < 2) {
+                erroFolha = 'A planilha da folha voltou sem linhas de dados.';
+                atualizarIndicadores();
+                return;
+            }
 
             const headerNorm = rows[0].map(normalizarTexto);
             const colFundo = localizarColuna(headerNorm, ['FUNDO'], []);
@@ -1097,27 +1136,30 @@
 
             rows.forEach((row, idx) => {
                 if (idx === 0 || !row || row.length === 0) return;
+                try {
+                    const fundo = colFundo >= 0 ? String(row[colFundo] || '').trim().toUpperCase() : '';
+                    const nome = colNome >= 0 ? String(row[colNome] || '').trim() : '';
+                    if (!fundo || !nome) return;
 
-                const fundo = colFundo >= 0 ? String(row[colFundo] || '').trim().toUpperCase() : '';
-                const nome = colNome >= 0 ? String(row[colNome] || '').trim() : '';
-                if (!fundo || !nome) return;
+                    const mesIdx = colMes >= 0 ? identificarMes(String(row[colMes] || '').trim().toUpperCase()) : 0;
+                    const secretariaRaw = colSecretaria >= 0 ? String(row[colSecretaria] || '').trim() : '';
 
-                const mesIdx = colMes >= 0 ? identificarMes(String(row[colMes] || '').trim().toUpperCase()) : 0;
-                const secretariaRaw = colSecretaria >= 0 ? String(row[colSecretaria] || '').trim() : '';
+                    let secretariaCodigo = secretariaRaw;
+                    let secretariaLabel = secretariaRaw;
+                    const m = secretariaRaw.match(/^(\d+)\s*-\s*(.+)$/);
+                    if (m) {
+                        secretariaCodigo = m[1];
+                        secretariaLabel = m[2].trim();
+                    }
 
-                let secretariaCodigo = secretariaRaw;
-                let secretariaLabel = secretariaRaw;
-                const m = secretariaRaw.match(/^(\d+)\s*-\s*(.+)$/);
-                if (m) {
-                    secretariaCodigo = m[1];
-                    secretariaLabel = m[2].trim();
+                    if (!contagemRotulo.has(secretariaCodigo)) contagemRotulo.set(secretariaCodigo, new Map());
+                    const mapaLabel = contagemRotulo.get(secretariaCodigo);
+                    mapaLabel.set(secretariaLabel, (mapaLabel.get(secretariaLabel) || 0) + 1);
+
+                    registrosFolha.push({ fundo, mesIdx, nome, secretariaCodigo });
+                } catch (e) {
+                    console.warn('Linha da folha ignorada por erro de leitura:', idx, e);
                 }
-
-                if (!contagemRotulo.has(secretariaCodigo)) contagemRotulo.set(secretariaCodigo, new Map());
-                const mapaLabel = contagemRotulo.get(secretariaCodigo);
-                mapaLabel.set(secretariaLabel, (mapaLabel.get(secretariaLabel) || 0) + 1);
-
-                registrosFolha.push({ fundo, mesIdx, nome, secretariaCodigo });
             });
 
             rotuloSecretariaPorCodigo = new Map();
@@ -1135,6 +1177,11 @@
         function renderFolhaIndicador(fundoSelecionado, mesSel) {
             const container = document.getElementById('listaFolha');
             if (!container) return;
+
+            if (erroFolha) {
+                container.innerHTML = `<p class="text-red-500 text-sm text-center py-6 px-4">Não foi possível carregar os dados da folha.<br>${escapeHtml(erroFolha)}</p>`;
+                return;
+            }
 
             if (registrosFolha.length === 0) {
                 container.innerHTML = '<p class="text-slate-400 text-sm text-center py-6">Dados da folha ainda não carregados ou indisponíveis.</p>';
