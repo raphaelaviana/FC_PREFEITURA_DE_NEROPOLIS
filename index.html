@@ -466,12 +466,27 @@
                 throw new Error('A planilha não retornou uma tabela válida.');
             }
 
-            const rows = [];
-            rows.push((j.table.cols || []).map(c => (c && c.label) || ''));
-            (j.table.rows || []).forEach(rr => {
-                if (!rr) { rows.push([]); return; }
-                rows.push((rr.c || []).map(c => (c ? c.v : '')));
+            const cabecalhoDeclarado = (j.table.cols || []).map(c => (c && c.label) || '');
+            const linhasDados = (j.table.rows || []).map(rr => {
+                if (!rr) return [];
+                return (rr.c || []).map(c => (c ? c.v : ''));
             });
+
+            const temCabecalhoDeclarado = cabecalhoDeclarado.some(v => String(v || '').trim() !== '');
+
+            const rows = [];
+            if (temCabecalhoDeclarado) {
+                rows.push(cabecalhoDeclarado);
+                rows.push(...linhasDados);
+            } else if (linhasDados.length > 0) {
+                // O Google Sheets às vezes não detecta a linha de cabeçalho (comum quando
+                // a maioria das colunas é texto) — nesse caso o cabeçalho vem como a
+                // primeira linha de dados em vez de vir em j.table.cols[].label.
+                rows.push(linhasDados[0]);
+                rows.push(...linhasDados.slice(1));
+            } else {
+                rows.push(cabecalhoDeclarado);
+            }
             return rows;
         }
 
