@@ -310,7 +310,7 @@
             <div class="bg-white rounded-lg shadow-lg overflow-hidden border border-slate-200">
                 <div class="bg-[#1b365d] text-white px-4 py-3 border-b-4 border-[#e65100]">
                     <h3 class="text-sm font-bold">FOLHA DE PAGAMENTO — FUNCIONÁRIOS POR SECRETARIA</h3>
-                    <p class="text-xs text-blue-200 mt-0.5">Quantidade de nomes únicos no mês selecionado</p>
+                    <p class="text-xs text-blue-200 mt-0.5">Nomes únicos por mês, de Janeiro até o mês selecionado</p>
                 </div>
                 <div id="listaFolha" class="overflow-x-auto"></div>
             </div>
@@ -505,31 +505,35 @@
             return { texto: String(valor), ord: 0 };
         }
 
-        async function processarArquivo() {
-            const SHEET_ID = '15Ng1oHMjpN7Yu_Re-teK_HaTq1nS7oLs';
-            const GID = '1863214707';
+        const PLANILHAS_FINANCEIRAS = [
+            { sheetId: '15Ng1oHMjpN7Yu_Re-teK_HaTq1nS7oLs', gid: '1863214707', anoForcado: '2026', rotulo: '2026' },
+            { sheetId: '1JCRJCIXDoNeUpfS0f3I5WCkrvHWD-CSV', gid: '0', anoForcado: '2025', rotulo: '2025' }
+        ];
+
+        async function carregarPlanilhaFinanceira(config) {
             try {
-                const r = await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&gid=${GID}`);
+                const r = await fetch(`https://docs.google.com/spreadsheets/d/${config.sheetId}/gviz/tq?tqx=out:json&gid=${config.gid}`);
                 if (!r.ok) {
-                    throw new Error(`Falha HTTP ${r.status} ao buscar a planilha principal.`);
+                    throw new Error(`Falha HTTP ${r.status} ao buscar a planilha de ${config.rotulo}.`);
                 }
                 const t = await r.text();
                 const rows = parseRespostaGviz(t);
-                guardarELerDadosExcel(rows);
+                guardarELerDadosExcel(rows, config.anoForcado);
                 const s = document.getElementById('infoStatus');
                 if (s) s.textContent = 'Dados carregados do Google Sheets';
             } catch (e) {
-                console.warn('Não foi possível carregar a planilha principal:', e);
+                console.warn(`Não foi possível carregar a planilha de ${config.rotulo}:`, e);
                 const s = document.getElementById('infoStatus');
-                if (s) s.textContent = `Erro ao carregar dados da planilha principal: ${(e && e.message) || e}`;
+                if (s) s.textContent = `Erro ao carregar dados de ${config.rotulo}: ${(e && e.message) || e}`;
             }
         }
+
         window.addEventListener('load', () => {
-            processarArquivo();
+            PLANILHAS_FINANCEIRAS.forEach(config => carregarPlanilhaFinanceira(config));
             processarFolha();
         });
 
-        function guardarELerDadosExcel(rows) {
+        function guardarELerDadosExcel(rows, anoForcado) {
             if (!rows || rows.length < 2) return;
 
             const headerNorm = rows[0].map(normalizarTexto);
@@ -545,8 +549,6 @@
             const colEnte = localizarColuna(headerNorm, ['ENTE'], []);
             const colSegReceita = localizarColuna(headerNorm, ['SEGREGACAO DE RECEITA'], []);
 
-            registrosBrutosExcel = [];
-
             rows.forEach((row, idx) => {
                 if (idx === 0 || !row || row.length === 0) return;
 
@@ -557,7 +559,7 @@
                 const infoData = colData >= 0 ? parseCelulaData(row[colData]) : { texto: '-', ord: 0 };
                 const ano = colAno >= 0
                     ? String(row[colAno] || '').trim()
-                    : (infoData.ord ? String(new Date(infoData.ord).getFullYear()) : '2026');
+                    : (anoForcado || (infoData.ord ? String(new Date(infoData.ord).getFullYear()) : '2026'));
 
                 let mesIdx = 0;
                 if (colMes >= 0) {
@@ -1211,51 +1213,61 @@
                 return;
             }
 
+            const ABREV_MESES = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
+            const mesesExibidos = [];
+            for (let m = 0; m <= mesSel; m++) mesesExibidos.push(m);
+
             const porSecretaria = new Map();
             registrosFolha.forEach(reg => {
-                if (reg.mesIdx !== mesSel) return;
+                if (reg.mesIdx > mesSel) return;
                 if (!fundoCorresponde(reg.fundo, fundoSelecionado)) return;
 
-                const nomeNormalizado = normalizarTexto(reg.nome);
-                if (!porSecretaria.has(reg.secretariaCodigo)) porSecretaria.set(reg.secretariaCodigo, new Set());
-                porSecretaria.get(reg.secretariaCodigo).add(nomeNormalizado);
+                if (!porSecretaria.has(reg.secretariaCodigo)) {
+                    porSecretaria.set(reg.secretariaCodigo, mesesExibidos.map(() => new Set()));
+                }
+                porSecretaria.get(reg.secretariaCodigo)[reg.mesIdx].add(normalizarTexto(reg.nome));
             });
 
-            const lista = Array.from(porSecretaria.entries())
-                .map(([codigo, nomes]) => ({
-                    codigo,
-                    label: rotuloSecretariaPorCodigo.get(codigo) || codigo,
-                    total: nomes.size
-                }))
-                .sort((a, b) => b.total - a.total);
-
-            if (lista.length === 0) {
-                container.innerHTML = `<p class="text-slate-400 text-sm text-center py-6">Nenhum dado de folha para ${escapeHtml(fundoSelecionado)} em ${MESES_NOMES[mesSel]}.</p>`;
+            if (porSecretaria.size === 0) {
+                container.innerHTML = `<p class="text-slate-400 text-sm text-center py-6">Nenhum dado de folha para ${escapeHtml(fundoSelecionado)} até ${MESES_NOMES[mesSel]}.</p>`;
                 return;
             }
 
-            const totalGeral = lista.reduce((s, g) => s + g.total, 0);
+            const lista = Array.from(porSecretaria.entries())
+                .map(([codigo, setsPorMes]) => ({
+                    codigo,
+                    label: rotuloSecretariaPorCodigo.get(codigo) || codigo,
+                    contagens: setsPorMes.map(s => s.size)
+                }))
+                .sort((a, b) => b.contagens[b.contagens.length - 1] - a.contagens[a.contagens.length - 1]);
 
-            const linhas = lista.map(g => `
-                <tr class="border-b border-slate-100">
-                    <td class="py-2 px-3 text-slate-700 font-medium">${escapeHtml(g.label)}</td>
-                    <td class="py-2 px-3 text-right font-semibold whitespace-nowrap">${g.total}</td>
-                </tr>
-            `).join('');
+            const totalPorMes = mesesExibidos.map((_, i) => lista.reduce((s, g) => s + g.contagens[i], 0));
+
+            const cabecalhoMeses = mesesExibidos.map(m => `<th class="py-2 px-3 font-semibold text-right">${ABREV_MESES[m]}</th>`).join('');
+
+            const linhas = lista.map(g => {
+                const celulas = g.contagens.map(c => `<td class="py-2 px-3 text-right whitespace-nowrap">${c > 0 ? c : '<span class="text-slate-300">-</span>'}</td>`).join('');
+                return `<tr class="border-b border-slate-100">
+                    <td class="py-2 px-3 text-slate-700 font-medium whitespace-nowrap">${escapeHtml(g.label)}</td>
+                    ${celulas}
+                </tr>`;
+            }).join('');
+
+            const totalCelulas = totalPorMes.map(t => `<td class="py-2.5 px-3 text-right">${t}</td>`).join('');
 
             container.innerHTML = `
                 <table class="w-full text-sm">
                     <thead>
                         <tr class="text-left text-slate-500 border-b-2 border-slate-200">
                             <th class="py-2 px-3 font-semibold">SECRETARIA / UNIDADE</th>
-                            <th class="py-2 px-3 font-semibold text-right">FUNCIONÁRIOS</th>
+                            ${cabecalhoMeses}
                         </tr>
                     </thead>
                     <tbody>${linhas}</tbody>
                     <tfoot>
                         <tr class="border-t-2 border-slate-800 font-bold text-slate-900">
                             <td class="py-2.5 px-3">TOTAL</td>
-                            <td class="py-2.5 px-3 text-right">${totalGeral}</td>
+                            ${totalCelulas}
                         </tr>
                     </tfoot>
                 </table>
