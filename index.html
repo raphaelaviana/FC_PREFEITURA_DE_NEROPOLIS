@@ -544,7 +544,10 @@
             const colData = localizarColuna(headerNorm, ['DATA'], []);
             const colFundo = localizarColuna(headerNorm, ['FUNDO'], ['UNIDADE', 'ENTIDADE']);
             const colAno = localizarColuna(headerNorm, ['ANO'], []);
-            const colDescricao = localizarColuna(headerNorm, ['DESCRICAO'], []);
+            // Algumas exportações nomeiam a primeira coluna de descrição como "DESCRICAO" e
+            // outras como "DESCRICAO_X" (quando há colunas de descrição duplicadas na planilha
+            // de origem). Nunca deve pegar "DESCRICAO_Y", que é outra coluna.
+            const colDescricao = localizarColuna(headerNorm, ['DESCRICAO', 'DESCRICAO_X'], []);
             const colTcm = localizarColuna(headerNorm, ['TCM'], []);
             const colEnte = localizarColuna(headerNorm, ['ENTE'], []);
             const colSegReceita = localizarColuna(headerNorm, ['SEGREGACAO DE RECEITA'], []);
