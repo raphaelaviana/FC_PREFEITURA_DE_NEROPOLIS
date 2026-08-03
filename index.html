@@ -122,6 +122,33 @@
         .painel-grupo-row:hover {
             background-color: #f8fafc;
         }
+
+        .tab-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 10px 16px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: #64748b;
+            border-bottom: 3px solid transparent;
+            cursor: pointer;
+            transition: color 0.15s ease, border-color 0.15s ease;
+            background: none;
+        }
+
+        .tab-btn:hover {
+            color: #1b365d;
+        }
+
+        .tab-btn.tab-ativo {
+            color: #1b365d;
+            border-bottom-color: #e65100;
+        }
+
+        #listaReceitas table, #listaFornecedores table, #listaFolha table {
+            border-collapse: collapse;
+        }
     </style>
 </head>
 <body class="min-h-screen flex flex-col bg-white">
@@ -186,38 +213,107 @@
         </div>
     </header>
 
+    <!-- Barra de Abas -->
+    <div class="max-w-[1600px] w-full mx-auto px-4 md:px-6 pt-4 bg-white">
+        <div class="flex gap-1 border-b border-slate-200">
+            <button id="tabBtnFluxo" onclick="mudarAba('fluxo')" type="button" class="tab-btn tab-ativo">
+                <i data-lucide="table" class="w-4 h-4"></i>
+                Fluxo de Caixa
+            </button>
+            <button id="tabBtnIndicadores" onclick="mudarAba('indicadores')" type="button" class="tab-btn">
+                <i data-lucide="bar-chart-3" class="w-4 h-4"></i>
+                Indicadores
+            </button>
+        </div>
+    </div>
+
     <!-- Main Content / Container Principal -->
     <main class="flex-1 max-w-[1600px] w-full mx-auto p-4 md:p-6 bg-white">
 
-        <!-- Card da Tabela Principal -->
-        <div class="bg-white rounded-lg shadow-lg overflow-hidden border border-slate-200">
-            
-            <div class="overflow-x-auto">
-                <table class="table-custom tabular-nums" id="matrizTable">
-                    <thead>
-                        <tr>
-                            <th class="text-left w-64 min-w-[220px]">DESCRIÇÃO</th>
-                            <th class="text-right min-w-[90px]">JANEIRO</th>
-                            <th class="text-right min-w-[90px]">FEVEREIRO</th>
-                            <th class="text-right min-w-[90px]">MARÇO</th>
-                            <th class="text-right min-w-[90px]">ABRIL</th>
-                            <th class="text-right min-w-[90px]">MAIO</th>
-                            <th class="text-right min-w-[90px]">JUNHO</th>
-                            <th class="text-right min-w-[90px]">JULHO</th>
-                            <th class="text-right min-w-[90px]">AGOSTO</th>
-                            <th class="text-right min-w-[90px]">SETEMBRO</th>
-                            <th class="text-right min-w-[90px]">OUTUBRO</th>
-                            <th class="text-right min-w-[90px]">NOVEMBRO</th>
-                            <th class="text-right min-w-[90px]">DEZEMBRO</th>
-                            <th class="text-right min-w-[110px] col-total">TOTAL</th>
-                        </tr>
-                    </thead>
-                    <tbody id="tableBody">
-                    </tbody>
-                </table>
+        <!-- ABA: FLUXO DE CAIXA -->
+        <div id="abaFluxoCaixa">
+
+            <!-- Card da Tabela Principal -->
+            <div class="bg-white rounded-lg shadow-lg overflow-hidden border border-slate-200">
+
+                <div class="overflow-x-auto">
+                    <table class="table-custom tabular-nums" id="matrizTable">
+                        <thead>
+                            <tr>
+                                <th class="text-left w-64 min-w-[220px]">DESCRIÇÃO</th>
+                                <th class="text-right min-w-[90px]">JANEIRO</th>
+                                <th class="text-right min-w-[90px]">FEVEREIRO</th>
+                                <th class="text-right min-w-[90px]">MARÇO</th>
+                                <th class="text-right min-w-[90px]">ABRIL</th>
+                                <th class="text-right min-w-[90px]">MAIO</th>
+                                <th class="text-right min-w-[90px]">JUNHO</th>
+                                <th class="text-right min-w-[90px]">JULHO</th>
+                                <th class="text-right min-w-[90px]">AGOSTO</th>
+                                <th class="text-right min-w-[90px]">SETEMBRO</th>
+                                <th class="text-right min-w-[90px]">OUTUBRO</th>
+                                <th class="text-right min-w-[90px]">NOVEMBRO</th>
+                                <th class="text-right min-w-[90px]">DEZEMBRO</th>
+                                <th class="text-right min-w-[110px] col-total">TOTAL</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tableBody">
+                        </tbody>
+                    </table>
+                </div>
+
             </div>
 
-            
+        </div>
+
+        <!-- ABA: INDICADORES -->
+        <div id="abaIndicadores" class="hidden">
+
+            <div class="flex items-center justify-end mb-4">
+                <div class="flex items-center bg-[#142847] border border-[#2c4d7d] rounded-md px-3 py-1.5 text-xs text-white">
+                    <i data-lucide="calendar-days" class="w-3.5 h-3.5 text-orange-400 mr-2"></i>
+                    <span class="text-slate-300 mr-1.5">Mês de referência:</span>
+                    <select id="selectMesIndicadores" onchange="this.dataset.ajustadoPeloUsuario='1'; atualizarIndicadores()" class="bg-transparent font-bold focus:outline-none cursor-pointer">
+                        <option class="bg-[#142847]" value="0">JANEIRO</option>
+                        <option class="bg-[#142847]" value="1">FEVEREIRO</option>
+                        <option class="bg-[#142847]" value="2">MARÇO</option>
+                        <option class="bg-[#142847]" value="3">ABRIL</option>
+                        <option class="bg-[#142847]" value="4">MAIO</option>
+                        <option class="bg-[#142847]" value="5">JUNHO</option>
+                        <option class="bg-[#142847]" value="6">JULHO</option>
+                        <option class="bg-[#142847]" value="7">AGOSTO</option>
+                        <option class="bg-[#142847]" value="8">SETEMBRO</option>
+                        <option class="bg-[#142847]" value="9">OUTUBRO</option>
+                        <option class="bg-[#142847]" value="10">NOVEMBRO</option>
+                        <option class="bg-[#142847]" value="11">DEZEMBRO</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+                <div class="bg-white rounded-lg shadow-lg overflow-hidden border border-slate-200">
+                    <div class="bg-[#1b365d] text-white px-4 py-3 border-b-4 border-[#e65100]">
+                        <h3 class="text-sm font-bold">RECEITAS POR CATEGORIA</h3>
+                        <p class="text-xs text-blue-200 mt-0.5">Receita própria — por tipo de receita, da maior para a menor</p>
+                    </div>
+                    <div id="listaReceitas" class="overflow-x-auto"></div>
+                </div>
+
+                <div class="bg-white rounded-lg shadow-lg overflow-hidden border border-slate-200">
+                    <div class="bg-[#1b365d] text-white px-4 py-3 border-b-4 border-[#e65100]">
+                        <h3 class="text-sm font-bold">TOP 10 FORNECEDORES</h3>
+                        <p class="text-xs text-blue-200 mt-0.5">Maiores gastos no ano (exclui Fopag e Despesas Tributárias)</p>
+                    </div>
+                    <div id="listaFornecedores" class="overflow-x-auto"></div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow-lg overflow-hidden border border-slate-200">
+                <div class="bg-[#1b365d] text-white px-4 py-3 border-b-4 border-[#e65100]">
+                    <h3 class="text-sm font-bold">FOLHA DE PAGAMENTO — FUNCIONÁRIOS POR SECRETARIA</h3>
+                    <p class="text-xs text-blue-200 mt-0.5">Quantidade de nomes únicos no mês selecionado</p>
+                </div>
+                <div id="listaFolha" class="overflow-x-auto"></div>
+            </div>
 
         </div>
 
@@ -349,6 +445,12 @@
             return -1;
         }
 
+        function fundoCorresponde(fundoReg, fundoSelecionado) {
+            if (fundoSelecionado === 'TODOS') return true;
+            if (fundoSelecionado === 'EXECUTIVO' && (fundoReg.includes('EXECUTIVO') || fundoReg === 'PREFEITURA')) return true;
+            return fundoReg.includes(fundoSelecionado);
+        }
+
         function parseCelulaData(valor) {
             if (valor === null || valor === undefined || valor === '') {
                 return { texto: '-', ord: 0 };
@@ -377,7 +479,10 @@
             const s = document.getElementById('infoStatus');
             if (s) s.textContent = 'Dados carregados do Google Sheets';
         }
-        window.addEventListener('load', processarArquivo);
+        window.addEventListener('load', () => {
+            processarArquivo();
+            processarFolha();
+        });
 
         function guardarELerDadosExcel(rows) {
             if (!rows || rows.length < 2) return;
@@ -429,7 +534,16 @@
                 });
             });
 
+            definirMesIndicadoresPadrao();
             recalcularEFiltrar();
+        }
+
+        function definirMesIndicadoresPadrao() {
+            const selMes = document.getElementById('selectMesIndicadores');
+            if (!selMes || selMes.dataset.ajustadoPeloUsuario === '1') return;
+            if (registrosBrutosExcel.length === 0) return;
+            const mesMax = registrosBrutosExcel.reduce((max, r) => Math.max(max, r.mesIdx), 0);
+            selMes.value = String(mesMax);
         }
 
         function recalcularEFiltrar() {
@@ -449,12 +563,7 @@
 
             registrosBrutosExcel.forEach(reg => {
                 if (anoSelecionado !== 'TODOS' && reg.ano !== anoSelecionado) return;
-
-                const fundoReg = reg.fundo;
-                const correspondeFundo = (fundoSelecionado === 'EXECUTIVO' && (fundoReg.includes('EXECUTIVO') || fundoReg === 'PREFEITURA')) ||
-                                         fundoReg.includes(fundoSelecionado);
-
-                if (!correspondeFundo && fundoSelecionado !== 'TODOS') return;
+                if (!fundoCorresponde(reg.fundo, fundoSelecionado)) return;
 
                 dadosFiltrados.forEach(cat => {
                     cat.filhos.forEach(filho => {
@@ -477,6 +586,8 @@
             renderizarTabela(dadosFiltrados, fundoSelecionado);
             const statusEl = document.getElementById('infoStatus');
             if (statusEl) statusEl.textContent = `Filtrado por: FUNDO = '${fundoSelecionado}', ANO = '${anoSelecionado}'`;
+
+            atualizarIndicadores();
         }
 
         function podeAbrirPainel(catDescricao, filhoDescricao) {
@@ -604,11 +715,7 @@
             const filhoUpper = filhoDescricao.toUpperCase();
             return registrosBrutosExcel.filter(reg => {
                 if (anoSelecionado !== 'TODOS' && reg.ano !== anoSelecionado) return false;
-
-                const fundoReg = reg.fundo;
-                const correspondeFundo = (fundoSelecionado === 'EXECUTIVO' && (fundoReg.includes('EXECUTIVO') || fundoReg === 'PREFEITURA')) ||
-                                         fundoReg.includes(fundoSelecionado);
-                if (!correspondeFundo && fundoSelecionado !== 'TODOS') return false;
+                if (!fundoCorresponde(reg.fundo, fundoSelecionado)) return false;
 
                 if (mesIdx !== 'TOTAL' && reg.mesIdx !== mesIdx) return false;
 
@@ -800,6 +907,290 @@
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') fecharPainel();
         });
+
+        /* ==================== ABA INDICADORES ==================== */
+
+        function mudarAba(aba) {
+            const abaFluxo = document.getElementById('abaFluxoCaixa');
+            const abaIndic = document.getElementById('abaIndicadores');
+            const btnFluxo = document.getElementById('tabBtnFluxo');
+            const btnIndic = document.getElementById('tabBtnIndicadores');
+            if (!abaFluxo || !abaIndic || !btnFluxo || !btnIndic) return;
+
+            if (aba === 'indicadores') {
+                abaFluxo.classList.add('hidden');
+                abaIndic.classList.remove('hidden');
+                btnFluxo.classList.remove('tab-ativo');
+                btnIndic.classList.add('tab-ativo');
+                atualizarIndicadores();
+            } else {
+                abaIndic.classList.add('hidden');
+                abaFluxo.classList.remove('hidden');
+                btnIndic.classList.remove('tab-ativo');
+                btnFluxo.classList.add('tab-ativo');
+            }
+        }
+
+        function obterClassificacoesDespesa(excluir) {
+            const excluirSet = new Set((excluir || []).map(x => x.toUpperCase()));
+            const lista = [];
+            estruturaBase
+                .filter(cat => cat.descricao === 'DESPESAS FIXAS' || cat.descricao === 'DESPESAS VARIÁVEIS')
+                .forEach(cat => {
+                    cat.filhos.forEach(f => {
+                        const nome = f.descricao.toUpperCase();
+                        if (!excluirSet.has(nome)) lista.push(nome);
+                    });
+                });
+            return lista;
+        }
+
+        function atualizarIndicadores() {
+            if (!document.getElementById('abaIndicadores')) return;
+
+            const fundoSelecionado = document.getElementById('selectFundo').value.toUpperCase();
+            const anoSelecionado = document.getElementById('selectAno').value.toUpperCase();
+            const selMes = document.getElementById('selectMesIndicadores');
+            const mesSel = selMes ? parseInt(selMes.value, 10) : 0;
+
+            renderReceitasIndicador(fundoSelecionado, anoSelecionado, mesSel);
+            renderFornecedoresIndicador(fundoSelecionado, anoSelecionado);
+            renderFolhaIndicador(fundoSelecionado, mesSel);
+        }
+
+        function renderReceitasIndicador(fundoSelecionado, anoSelecionado, mesSel) {
+            const container = document.getElementById('listaReceitas');
+            if (!container) return;
+
+            const mapa = new Map();
+            registrosBrutosExcel.forEach(reg => {
+                if (anoSelecionado !== 'TODOS' && reg.ano !== anoSelecionado) return;
+                if (!fundoCorresponde(reg.fundo, fundoSelecionado)) return;
+                if (reg.classificacao !== 'RECEITA PRÓPRIA') return;
+                if (reg.mesIdx > mesSel) return;
+
+                const chave = (reg.segReceita && reg.segReceita.trim()) || 'NÃO CLASSIFICADO';
+                if (!mapa.has(chave)) mapa.set(chave, { label: chave, noMes: 0, ytd: 0 });
+                const g = mapa.get(chave);
+                g.ytd += reg.saldo;
+                if (reg.mesIdx === mesSel) g.noMes += reg.saldo;
+            });
+
+            const lista = Array.from(mapa.values()).sort((a, b) => b.ytd - a.ytd);
+
+            if (lista.length === 0) {
+                container.innerHTML = '<p class="text-slate-400 text-sm text-center py-6">Nenhuma receita própria encontrada para este filtro.</p>';
+                return;
+            }
+
+            let totalNoMes = 0, totalYtd = 0;
+            const linhas = lista.map(g => {
+                totalNoMes += g.noMes;
+                totalYtd += g.ytd;
+                return `<tr class="border-b border-slate-100">
+                    <td class="py-2 px-3 text-slate-700 font-medium">${escapeHtml(g.label)}</td>
+                    <td class="py-2 px-3 text-right whitespace-nowrap">${formatarValor(g.noMes)}</td>
+                    <td class="py-2 px-3 text-right font-semibold whitespace-nowrap">${formatarValor(g.ytd)}</td>
+                </tr>`;
+            }).join('');
+
+            container.innerHTML = `
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-slate-500 border-b-2 border-slate-200">
+                            <th class="py-2 px-3 font-semibold">CATEGORIA</th>
+                            <th class="py-2 px-3 font-semibold text-right">NO MÊS</th>
+                            <th class="py-2 px-3 font-semibold text-right">TOTAL ATÉ O MÊS</th>
+                        </tr>
+                    </thead>
+                    <tbody>${linhas}</tbody>
+                    <tfoot>
+                        <tr class="border-t-2 border-slate-800 font-bold text-slate-900">
+                            <td class="py-2.5 px-3">TOTAL</td>
+                            <td class="py-2.5 px-3 text-right">${formatarValor(totalNoMes)}</td>
+                            <td class="py-2.5 px-3 text-right">${formatarValor(totalYtd)}</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            `;
+        }
+
+        function renderFornecedoresIndicador(fundoSelecionado, anoSelecionado) {
+            const container = document.getElementById('listaFornecedores');
+            if (!container) return;
+
+            const classificacoesValidas = new Set(obterClassificacoesDespesa(['FOPAG', 'DESPESAS TRIBUTÁRIAS']));
+
+            const mapa = new Map();
+            registrosBrutosExcel.forEach(reg => {
+                if (anoSelecionado !== 'TODOS' && reg.ano !== anoSelecionado) return;
+                if (!fundoCorresponde(reg.fundo, fundoSelecionado)) return;
+                if (!classificacoesValidas.has(reg.classificacao)) return;
+
+                const chave = (reg.descricao && reg.descricao.trim()) || 'NÃO IDENTIFICADO';
+                mapa.set(chave, (mapa.get(chave) || 0) + reg.saldo);
+            });
+
+            const top10 = Array.from(mapa.entries())
+                .map(([nome, total]) => ({ nome, total }))
+                .sort((a, b) => Math.abs(b.total) - Math.abs(a.total))
+                .slice(0, 10);
+
+            if (top10.length === 0) {
+                container.innerHTML = '<p class="text-slate-400 text-sm text-center py-6">Nenhum lançamento encontrado para este filtro.</p>';
+                return;
+            }
+
+            const linhas = top10.map((f, idx) => `
+                <tr class="border-b border-slate-100">
+                    <td class="py-2 px-3 text-slate-400 font-bold w-8">${idx + 1}º</td>
+                    <td class="py-2 px-3 text-slate-700 font-medium">${escapeHtml(f.nome)}</td>
+                    <td class="py-2 px-3 text-right font-semibold whitespace-nowrap">${formatarValor(f.total)}</td>
+                </tr>
+            `).join('');
+
+            container.innerHTML = `
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-slate-500 border-b-2 border-slate-200">
+                            <th class="py-2 px-3 font-semibold w-8">#</th>
+                            <th class="py-2 px-3 font-semibold">FORNECEDOR</th>
+                            <th class="py-2 px-3 font-semibold text-right">TOTAL GASTO</th>
+                        </tr>
+                    </thead>
+                    <tbody>${linhas}</tbody>
+                </table>
+            `;
+        }
+
+        /* ---------- Folha de Pagamento (planilha separada) ---------- */
+
+        let registrosFolha = [];
+        let rotuloSecretariaPorCodigo = new Map();
+
+        async function processarFolha() {
+            const SHEET_ID_FOLHA = '1n87o_16uQEPSeAaxmJVRgx8-ygLb4pBf';
+            try {
+                const r = await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID_FOLHA}/gviz/tq?tqx=out:json`);
+                const t = await r.text();
+                const j = JSON.parse(t.substring(47).slice(0, -2));
+                const rows = [];
+                rows.push(j.table.cols.map(c => c.label || ''));
+                j.table.rows.forEach(rr => rows.push((rr.c || []).map(c => c ? c.v : '')));
+                guardarELerDadosFolha(rows);
+            } catch (e) {
+                console.warn('Não foi possível carregar a folha de pagamento:', e);
+            }
+        }
+
+        function guardarELerDadosFolha(rows) {
+            if (!rows || rows.length < 2) return;
+
+            const headerNorm = rows[0].map(normalizarTexto);
+            const colFundo = localizarColuna(headerNorm, ['FUNDO'], []);
+            const colMes = localizarColuna(headerNorm, ['MES'], []);
+            const colNome = localizarColuna(headerNorm, ['NOME'], []);
+            const colSecretaria = localizarColuna(headerNorm, ['SECRETARIA'], []);
+
+            registrosFolha = [];
+            const contagemRotulo = new Map();
+
+            rows.forEach((row, idx) => {
+                if (idx === 0 || !row || row.length === 0) return;
+
+                const fundo = colFundo >= 0 ? String(row[colFundo] || '').trim().toUpperCase() : '';
+                const nome = colNome >= 0 ? String(row[colNome] || '').trim() : '';
+                if (!fundo || !nome) return;
+
+                const mesIdx = colMes >= 0 ? identificarMes(String(row[colMes] || '').trim().toUpperCase()) : 0;
+                const secretariaRaw = colSecretaria >= 0 ? String(row[colSecretaria] || '').trim() : '';
+
+                let secretariaCodigo = secretariaRaw;
+                let secretariaLabel = secretariaRaw;
+                const m = secretariaRaw.match(/^(\d+)\s*-\s*(.+)$/);
+                if (m) {
+                    secretariaCodigo = m[1];
+                    secretariaLabel = m[2].trim();
+                }
+
+                if (!contagemRotulo.has(secretariaCodigo)) contagemRotulo.set(secretariaCodigo, new Map());
+                const mapaLabel = contagemRotulo.get(secretariaCodigo);
+                mapaLabel.set(secretariaLabel, (mapaLabel.get(secretariaLabel) || 0) + 1);
+
+                registrosFolha.push({ fundo, mesIdx, nome, secretariaCodigo });
+            });
+
+            rotuloSecretariaPorCodigo = new Map();
+            contagemRotulo.forEach((mapaLabel, codigo) => {
+                let melhor = codigo, melhorCount = -1;
+                mapaLabel.forEach((count, label) => {
+                    if (count > melhorCount) { melhor = label; melhorCount = count; }
+                });
+                rotuloSecretariaPorCodigo.set(codigo, melhor);
+            });
+
+            atualizarIndicadores();
+        }
+
+        function renderFolhaIndicador(fundoSelecionado, mesSel) {
+            const container = document.getElementById('listaFolha');
+            if (!container) return;
+
+            if (registrosFolha.length === 0) {
+                container.innerHTML = '<p class="text-slate-400 text-sm text-center py-6">Dados da folha ainda não carregados ou indisponíveis.</p>';
+                return;
+            }
+
+            const porSecretaria = new Map();
+            registrosFolha.forEach(reg => {
+                if (reg.mesIdx !== mesSel) return;
+                if (!fundoCorresponde(reg.fundo, fundoSelecionado)) return;
+
+                const nomeNormalizado = normalizarTexto(reg.nome);
+                if (!porSecretaria.has(reg.secretariaCodigo)) porSecretaria.set(reg.secretariaCodigo, new Set());
+                porSecretaria.get(reg.secretariaCodigo).add(nomeNormalizado);
+            });
+
+            const lista = Array.from(porSecretaria.entries())
+                .map(([codigo, nomes]) => ({
+                    codigo,
+                    label: rotuloSecretariaPorCodigo.get(codigo) || codigo,
+                    total: nomes.size
+                }))
+                .sort((a, b) => b.total - a.total);
+
+            if (lista.length === 0) {
+                container.innerHTML = `<p class="text-slate-400 text-sm text-center py-6">Nenhum dado de folha para ${escapeHtml(fundoSelecionado)} em ${MESES_NOMES[mesSel]}.</p>`;
+                return;
+            }
+
+            const totalGeral = lista.reduce((s, g) => s + g.total, 0);
+
+            const linhas = lista.map(g => `
+                <tr class="border-b border-slate-100">
+                    <td class="py-2 px-3 text-slate-700 font-medium">${escapeHtml(g.label)}</td>
+                    <td class="py-2 px-3 text-right font-semibold whitespace-nowrap">${g.total}</td>
+                </tr>
+            `).join('');
+
+            container.innerHTML = `
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-slate-500 border-b-2 border-slate-200">
+                            <th class="py-2 px-3 font-semibold">SECRETARIA / UNIDADE</th>
+                            <th class="py-2 px-3 font-semibold text-right">FUNCIONÁRIOS</th>
+                        </tr>
+                    </thead>
+                    <tbody>${linhas}</tbody>
+                    <tfoot>
+                        <tr class="border-t-2 border-slate-800 font-bold text-slate-900">
+                            <td class="py-2.5 px-3">TOTAL</td>
+                            <td class="py-2.5 px-3 text-right">${totalGeral}</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            `;
+        }
 
         recalcularEFiltrar();
     </script>
