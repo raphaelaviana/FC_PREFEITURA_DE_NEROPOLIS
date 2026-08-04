@@ -147,7 +147,7 @@
             border-bottom-color: #e65100;
         }
 
-        #listaReceitas table, #listaFornecedores table, #listaFolha table, #listaSaldos table {
+        #listaReceitas table, #listaFornecedores table, #listaFolha table, #listaSaldos table, #listaOutrasFontes table {
             border-collapse: collapse;
         }
     </style>
@@ -349,8 +349,8 @@
             <div class="bg-white rounded-lg shadow-lg overflow-hidden border border-slate-200 mb-4">
                 <div class="bg-[#1b365d] text-white px-4 py-3 border-b-4 border-[#e65100] flex items-start justify-between gap-3">
                     <div>
-                        <h3 class="text-sm font-bold">SALDO EM CAIXA POR FUNDO</h3>
-                        <p class="text-xs text-blue-200 mt-0.5">Saldo livre disponível (fontes 00, 01 e 02) x saldo total das contas, no mês de referência. Clique num fundo para ver o detalhamento por conta e fonte.</p>
+                        <h3 class="text-sm font-bold">SALDO LIVRE DISPONÍVEL POR FUNDO — EVOLUÇÃO MENSAL</h3>
+                        <p class="text-xs text-blue-200 mt-0.5">Fontes 00, 01 e 02 (exercício corrente + saldo de exercícios anteriores). Mostra todos os fundos, independente do filtro de Fundo. Clique num valor para ver o detalhamento completo daquele fundo no mês.</p>
                     </div>
                     <button type="button" onclick="alternarLegendaFontes()" class="shrink-0 inline-flex items-center gap-1 text-xs text-blue-200 hover:text-white border border-[#2c4d7d] rounded px-2 py-1 whitespace-nowrap">
                         <i data-lucide="info" class="w-3.5 h-3.5"></i>
@@ -359,6 +359,14 @@
                 </div>
                 <div id="legendaFontes" class="hidden px-4 py-3 bg-amber-50 border-b border-amber-200 text-xs text-slate-700"></div>
                 <div id="listaSaldos" class="overflow-x-auto"></div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow-lg overflow-hidden border border-slate-200 mb-4">
+                <div class="bg-[#1b365d] text-white px-4 py-3 border-b-4 border-[#e65100]">
+                    <h3 class="text-sm font-bold" id="tituloOutrasFontes">OUTRAS FONTES (VINCULADAS)</h3>
+                    <p class="text-xs text-blue-200 mt-0.5">Segue o filtro de Fundo selecionado no topo da página, no mês de referência. Clique numa fonte para ver o detalhamento por conta.</p>
+                </div>
+                <div id="listaOutrasFontes" class="overflow-x-auto"></div>
             </div>
 
         </div>
@@ -1361,42 +1369,75 @@
         let registrosSaldos = [];
         let erroSaldos = null;
 
-        // Legenda das fontes de recursos, montada por pesquisa sobre o padrão de
-        // codificação usado por municípios de Goiás (TCM-GO). Não foi possível acessar
-        // automaticamente a tabela oficial do TCM-GO (o site bloqueia acesso automatizado
-        // a esse arquivo), então esta legenda é uma referência de melhor esforço — os
-        // itens marcados "a confirmar"/"provável" têm menos certeza e vale a pena
-        // confirmar com o contador ou o controle interno.
-        const LEGENDA_FONTES = {
+        // Legenda das fontes de recursos confirmada pela própria Prefeitura, código completo
+        // (especificação + detalhamento) por fundo. O prefixo do código (1.xx.xxx = exercício
+        // corrente, 2.xx.xxx = saldo de exercícios anteriores) é ignorado na busca — é a mesma
+        // fonte, só que de anos diferentes — por isso a chave aqui é só "especificação.detalhamento".
+        const LEGENDA_FONTES_POR_FUNDO = {
+            'EXECUTIVO': {
+                '17.000': 'CIP — Contribuição de Iluminação Pública',
+                '34.000': 'Emenda Cultural',
+                '70.074': 'Petróleo (royalties)',
+                '80.000': 'Emenda'
+            },
+            'FME': {
+                '15.049': 'QSE — Quota Salário Educação',
+                '15.051': 'PNAE',
+                '15.052': 'PNAE',
+                '24.085': 'Transporte Escolar',
+                '37.000': 'Reforma da Escola João Paulo II'
+            },
+            'FMS': {
+                '06.015': 'Vigilância Sanitária',
+                '07.013': 'Assistência Farmacêutica',
+                '07.062': 'Combate a Endemias',
+                '07.064': 'Custeio',
+                '07.097': 'Piso de Enfermagem',
+                '09.008': 'Construção de UBS',
+                '31.010': 'Programa Saúde',
+                '81.000': 'Emendas',
+                '31.000': 'Emenda Custeio Laboratório'
+            },
+            'FUNDEB': {
+                '49.000': 'Escola de Tempo Integral'
+            }
+        };
+
+        // Legenda genérica (por código de 2 dígitos, sem detalhamento) usada como referência de
+        // melhor esforço quando o código completo não está na lista confirmada acima — montada por
+        // pesquisa sobre o padrão de fontes usado por municípios de Goiás (TCM-GO), sem acesso à
+        // tabela oficial do TCM-GO (o site bloqueia acesso automatizado a esse arquivo). Itens
+        // marcados "a confirmar"/"provável" têm menos certeza.
+        const LEGENDA_FONTES_GENERICA = {
             '00': 'Recursos livres / não vinculados',
             '01': 'Recursos livres / não vinculados',
             '02': 'Recursos livres / não vinculados',
             '03': 'Recursos vinculados — código 03 (a confirmar)',
-            '06': 'Recursos vinculados — código 06 (a confirmar)',
-            '07': 'Transferências do FNDE — educação (provável: PNAE/PNATE/PDDE)',
-            '09': 'Recursos vinculados — código 09 (a confirmar)',
-            '15': 'Transferências do SUS — saúde (provável)',
+            '06': 'Recursos vinculados à saúde (provável)',
+            '07': 'Transferências do FNDE/SUS (provável)',
+            '09': 'Recursos vinculados à saúde (provável)',
+            '15': 'Transferências do FNDE — educação (provável)',
             '16': 'Transferências do Fundo Nacional de Assistência Social — FNAS (provável)',
-            '17': 'Transferências de convênios (provável)',
+            '17': 'Contribuições/transferências vinculadas (provável)',
             '18': 'FUNDEB — impostos vinculados (provável)',
             '19': 'FUNDEB — complementação da União (provável)',
             '20': 'Recursos vinculados — código 20 (a confirmar)',
-            '24': 'Recursos vinculados — código 24 (a confirmar)',
+            '24': 'Transporte / recursos vinculados (provável)',
             '29': 'Operações de crédito (provável)',
-            '31': 'Transferências do FNDE — educação (provável)',
+            '31': 'Transferências do FNDE/Saúde (provável)',
             '32': 'Convênios de educação (provável)',
-            '34': 'Convênios de assistência social (provável)',
+            '34': 'Emendas / convênios (provável)',
             '36': 'CIDE / contribuições vinculadas (a confirmar)',
-            '37': 'FUNDEB — recursos vinculados (provável)',
+            '37': 'Recursos vinculados — reforma/obra (provável)',
             '44': 'Transferências do SUS — bloco de custeio (provável)',
             '49': 'Outras transferências vinculadas (a confirmar)',
             '50': 'Convênios com a União (a confirmar)',
             '51': 'Convênios com o Estado (a confirmar)',
             '52': 'Convênios com Município/outros entes (a confirmar)',
-            '70': 'FUNDEB — complementação da União (VAAT/VAAF) (provável)',
+            '70': 'Petróleo / royalties / FUNDEB (provável)',
             '71': 'Recursos vinculados — código 71 (a confirmar)',
-            '80': 'Recursos vinculados — código 80 (a confirmar)',
-            '81': 'Alienação de bens (provável)',
+            '80': 'Emendas / recursos vinculados (provável)',
+            '81': 'Emendas / alienação de bens (provável)',
             '83': 'Recursos vinculados — código 83 (a confirmar)',
             '84': 'Recursos vinculados — código 84 (a confirmar)',
             '92': 'Recursos vinculados — código 92 (a confirmar)'
@@ -1406,12 +1447,22 @@
             const texto = String(fonteRaw || '').trim();
             const partes = texto.split('.');
             const especificacao = partes.length > 1 ? partes[1] : partes[0];
+            const detalhamento = partes.length > 2 ? partes[2] : '000';
             const livre = ['00', '01', '02'].includes(especificacao);
-            return { texto, especificacao, livre };
+            return { texto, especificacao, detalhamento, chave: `${especificacao}.${detalhamento}`, livre };
         }
 
-        function descricaoFonte(especificacao) {
-            return LEGENDA_FONTES[especificacao] || `Fonte vinculada — código ${especificacao} (a confirmar)`;
+        // Retorna { texto, confirmado }. "confirmado" = true quando a descrição veio da lista
+        // que a própria Prefeitura passou (código completo, por fundo); false quando é só uma
+        // referência genérica de melhor esforço que ainda vale a pena confirmar.
+        function descricaoFonte(fundo, chave, especificacao) {
+            const porFundo = LEGENDA_FONTES_POR_FUNDO[fundo];
+            if (porFundo && porFundo[chave]) {
+                return { texto: porFundo[chave], confirmado: true };
+            }
+            const generico = LEGENDA_FONTES_GENERICA[especificacao];
+            if (generico) return { texto: generico, confirmado: false };
+            return { texto: `Fonte vinculada — código ${chave} (a confirmar)`, confirmado: false };
         }
 
         const SHEET_ID_SALDOS = '10TUzZq7OqC71bxmHvIP3p5IkWUgy5O3S';
@@ -1483,7 +1534,8 @@
 
                     registrosSaldos.push({
                         fundo, mesIdx, ano, banco, numConta, nomeConta,
-                        fonte: fonteInfo.texto, especificacaoFonte: fonteInfo.especificacao, livre: fonteInfo.livre,
+                        fonte: fonteInfo.texto, especificacaoFonte: fonteInfo.especificacao,
+                        detalhamentoFonte: fonteInfo.detalhamento, chaveFonte: fonteInfo.chave, livre: fonteInfo.livre,
                         anterior, credito, debito, saldo
                     });
                 } catch (e) {
@@ -1503,72 +1555,168 @@
                 return;
             }
 
-            const codigos = Array.from(new Set(registrosSaldos.map(r => r.especificacaoFonte))).sort();
-            const itens = (codigos.length > 0 ? codigos : Object.keys(LEGENDA_FONTES)).map(cod =>
-                `<div class="py-1"><span class="font-mono font-bold text-slate-900">${escapeHtml(cod)}</span> — ${escapeHtml(descricaoFonte(cod))}</div>`
-            ).join('');
+            const porFundo = new Map();
+            registrosSaldos.forEach(r => {
+                if (r.livre) return;
+                if (!porFundo.has(r.fundo)) porFundo.set(r.fundo, new Set());
+                porFundo.get(r.fundo).add(r.chaveFonte);
+            });
+
+            const blocos = Array.from(porFundo.keys()).sort().map(fundo => {
+                const chaves = Array.from(porFundo.get(fundo)).sort();
+                const linhas = chaves.map(chave => {
+                    const especificacao = chave.split('.')[0];
+                    const info = descricaoFonte(fundo, chave, especificacao);
+                    const marca = info.confirmado ? '<span class="text-emerald-600 font-bold">✓</span> ' : '';
+                    return `<div class="py-0.5">${marca}<span class="font-mono font-bold text-slate-900">${escapeHtml(chave)}</span> — ${escapeHtml(info.texto)}</div>`;
+                }).join('');
+                return `<div class="mb-3"><div class="font-bold text-slate-800 mb-1">${escapeHtml(fundo)}</div>${linhas}</div>`;
+            }).join('');
 
             el.innerHTML = `
-                <p class="mb-2">Legenda montada por pesquisa sobre o padrão de fontes de recursos usado por municípios de Goiás — não confirmada automaticamente contra a tabela oficial do TCM-GO. Itens marcados "a confirmar"/"provável" merecem revisão.</p>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6">${itens}</div>
+                <p class="mb-2">Itens com <span class="text-emerald-600 font-bold">✓</span> foram confirmados por vocês. Os demais são referência genérica de pesquisa sobre o padrão de fontes usado por municípios de Goiás — não confirmada contra a tabela oficial do TCM-GO — e marcados "a confirmar"/"provável" merecem revisão.</p>
+                ${blocos || '<p class="text-slate-400">Nenhuma fonte vinculada encontrada nos dados carregados.</p>'}
             `;
             el.classList.remove('hidden');
         }
 
+        // Resolve o ano a exibir quando o filtro global de Ano está em "TODOS OS ANOS" —
+        // saldo é uma posição (estoque), então não faz sentido somar anos diferentes; usamos
+        // o ano mais recente disponível nos dados de saldo carregados.
+        function resolverAnoSaldos(anoSelecionado) {
+            if (anoSelecionado !== 'TODOS') return anoSelecionado;
+            const anosDisponiveis = registrosSaldos.map(r => r.ano).filter(Boolean);
+            return anosDisponiveis.length > 0 ? anosDisponiveis.sort().slice(-1)[0] : '';
+        }
+
         function renderSaldosIndicador() {
-            const container = document.getElementById('listaSaldos');
-            if (!container) return;
+            const containerLivre = document.getElementById('listaSaldos');
+            const containerOutras = document.getElementById('listaOutrasFontes');
+            if (!containerLivre || !containerOutras) return;
 
             const anoSelecionado = document.getElementById('selectAno').value.toUpperCase();
+            const fundoSelecionado = document.getElementById('selectFundo').value.toUpperCase();
             const selMes = document.getElementById('selectMesSaldo');
             const mesSel = selMes ? parseInt(selMes.value, 10) : 0;
 
+            const tituloOutras = document.getElementById('tituloOutrasFontes');
+            if (tituloOutras) tituloOutras.textContent = `OUTRAS FONTES (VINCULADAS) — ${fundoSelecionado}`;
+
             if (erroSaldos) {
-                container.innerHTML = `<p class="text-red-500 text-sm text-center py-6 px-4">Não foi possível carregar os saldos por fundo.<br>${escapeHtml(erroSaldos)}</p>`;
+                const msg = `<p class="text-red-500 text-sm text-center py-6 px-4">Não foi possível carregar os saldos por fundo.<br>${escapeHtml(erroSaldos)}</p>`;
+                containerLivre.innerHTML = msg;
+                containerOutras.innerHTML = msg;
                 return;
             }
 
             if (registrosSaldos.length === 0) {
-                container.innerHTML = '<p class="text-slate-400 text-sm text-center py-6">Dados de saldo por fundo ainda não carregados ou indisponíveis.</p>';
+                const msg = '<p class="text-slate-400 text-sm text-center py-6">Dados de saldo por fundo ainda não carregados ou indisponíveis.</p>';
+                containerLivre.innerHTML = msg;
+                containerOutras.innerHTML = msg;
                 return;
             }
 
-            // Saldo é uma posição (estoque), não um fluxo acumulável — por isso filtramos
-            // pelo mês exato selecionado (e não "até o mês", como nas receitas/despesas).
-            let anoParaExibir = anoSelecionado;
-            if (anoParaExibir === 'TODOS') {
-                const anosDisponiveis = registrosSaldos
-                    .filter(r => r.mesIdx === mesSel)
-                    .map(r => r.ano)
-                    .filter(Boolean);
-                anoParaExibir = anosDisponiveis.length > 0 ? anosDisponiveis.sort().slice(-1)[0] : '';
-            }
+            const anoParaExibir = resolverAnoSaldos(anoSelecionado);
+            renderSaldosLivresMensal(containerLivre, anoParaExibir, mesSel);
+            renderOutrasFontesPorFundo(containerOutras, anoParaExibir, fundoSelecionado, mesSel);
+        }
 
-            const registrosDoMes = registrosSaldos.filter(r => r.mesIdx === mesSel && (!anoParaExibir || r.ano === anoParaExibir));
+        // Tabela 1: fontes livres (00/01/02), evolução mensal de Janeiro até o mês selecionado,
+        // todos os fundos — não é afetada pelo filtro de Fundo do topo da página, de propósito.
+        function renderSaldosLivresMensal(container, anoParaExibir, mesSel) {
+            const registrosLivres = registrosSaldos.filter(r =>
+                r.livre && r.mesIdx <= mesSel && (!anoParaExibir || r.ano === anoParaExibir));
 
-            if (registrosDoMes.length === 0) {
-                container.innerHTML = `<p class="text-slate-400 text-sm text-center py-6">Nenhum saldo encontrado para ${MESES_NOMES[mesSel]}${anoParaExibir ? ' de ' + anoParaExibir : ''}.</p>`;
+            if (registrosLivres.length === 0) {
+                container.innerHTML = `<p class="text-slate-400 text-sm text-center py-6">Nenhum saldo livre encontrado até ${MESES_NOMES[mesSel]}${anoParaExibir ? ' de ' + anoParaExibir : ''}.</p>`;
                 return;
             }
+
+            const ABREV_MESES = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
+            const mesesExibidos = [];
+            for (let m = 0; m <= mesSel; m++) mesesExibidos.push(m);
 
             const porFundo = new Map();
-            registrosDoMes.forEach(r => {
-                if (!porFundo.has(r.fundo)) porFundo.set(r.fundo, { fundo: r.fundo, livre: 0, total: 0 });
-                const g = porFundo.get(r.fundo);
-                g.total += r.saldo;
-                if (r.livre) g.livre += r.saldo;
+            registrosLivres.forEach(r => {
+                if (!porFundo.has(r.fundo)) porFundo.set(r.fundo, mesesExibidos.map(() => 0));
+                porFundo.get(r.fundo)[r.mesIdx] += r.saldo;
             });
 
-            const lista = Array.from(porFundo.values()).sort((a, b) => b.total - a.total);
+            const lista = Array.from(porFundo.entries())
+                .map(([fundo, valores]) => ({ fundo, valores }))
+                .sort((a, b) => b.valores[b.valores.length - 1] - a.valores[a.valores.length - 1]);
 
-            let totalLivre = 0, totalGeral = 0;
+            const totalPorMes = mesesExibidos.map((_, i) => lista.reduce((s, g) => s + g.valores[i], 0));
+            const cabecalhoMeses = mesesExibidos.map(m => `<th class="py-2 px-3 font-semibold text-right">${ABREV_MESES[m]}</th>`).join('');
+
             const linhas = lista.map(g => {
-                totalLivre += g.livre;
-                totalGeral += g.total;
-                return `<tr class="painel-grupo-row cursor-pointer border-b border-slate-100" data-fundo="${escapeHtml(g.fundo)}">
-                    <td class="py-2 px-3 text-slate-700 font-medium">${escapeHtml(g.fundo)}</td>
-                    <td class="py-2 px-3 text-right font-semibold whitespace-nowrap text-emerald-700">${formatarValor(g.livre)}</td>
-                    <td class="py-2 px-3 text-right whitespace-nowrap">${formatarValor(g.total)}</td>
+                const celulas = g.valores.map((v, i) => `<td class="py-2 px-3 text-right whitespace-nowrap cel-clicavel text-emerald-700 font-medium" data-fundo="${escapeHtml(g.fundo)}" data-mes="${i}">${formatarValor(v)}</td>`).join('');
+                return `<tr class="border-b border-slate-100">
+                    <td class="py-2 px-3 text-slate-700 font-medium whitespace-nowrap">${escapeHtml(g.fundo)}</td>
+                    ${celulas}
+                </tr>`;
+            }).join('');
+
+            const totalCelulas = totalPorMes.map(t => `<td class="py-2.5 px-3 text-right text-emerald-800">${formatarValor(t)}</td>`).join('');
+
+            container.innerHTML = `
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-slate-500 border-b-2 border-slate-200">
+                            <th class="py-2 px-3 font-semibold">FUNDO</th>
+                            ${cabecalhoMeses}
+                        </tr>
+                    </thead>
+                    <tbody>${linhas}</tbody>
+                    <tfoot>
+                        <tr class="border-t-2 border-slate-800 font-bold text-slate-900">
+                            <td class="py-2.5 px-3">TOTAL</td>
+                            ${totalCelulas}
+                        </tr>
+                    </tfoot>
+                </table>
+            `;
+
+            container.querySelectorAll('td[data-fundo]').forEach(td => {
+                const fundo = td.getAttribute('data-fundo');
+                const mesIdx = parseInt(td.getAttribute('data-mes'), 10);
+                td.title = `Ver detalhamento de ${fundo} em ${MESES_NOMES[mesIdx]}`;
+                td.addEventListener('click', () => abrirPainelSaldoFundo(fundo, anoParaExibir, mesIdx));
+            });
+        }
+
+        // Tabela 2: outras fontes (vinculadas), no mês selecionado, filtradas pelo fundo
+        // selecionado no topo da página (segue o filtro de Fundo, como pedido).
+        function renderOutrasFontesPorFundo(container, anoParaExibir, fundoSelecionado, mesSel) {
+            const registrosFiltrados = registrosSaldos.filter(r =>
+                !r.livre && r.mesIdx === mesSel && (!anoParaExibir || r.ano === anoParaExibir) &&
+                fundoCorresponde(r.fundo, fundoSelecionado));
+
+            if (registrosFiltrados.length === 0) {
+                container.innerHTML = `<p class="text-slate-400 text-sm text-center py-6">Nenhuma fonte vinculada encontrada para ${escapeHtml(fundoSelecionado)} em ${MESES_NOMES[mesSel]}${anoParaExibir ? ' de ' + anoParaExibir : ''}.</p>`;
+                return;
+            }
+
+            const porFonte = new Map();
+            registrosFiltrados.forEach(r => {
+                if (!porFonte.has(r.chaveFonte)) {
+                    porFonte.set(r.chaveFonte, { chave: r.chaveFonte, especificacao: r.especificacaoFonte, fundo: r.fundo, saldo: 0 });
+                }
+                porFonte.get(r.chaveFonte).saldo += r.saldo;
+            });
+
+            const lista = Array.from(porFonte.values()).sort((a, b) => Math.abs(b.saldo) - Math.abs(a.saldo));
+
+            let total = 0;
+            const linhas = lista.map(f => {
+                total += f.saldo;
+                const info = descricaoFonte(f.fundo, f.chave, f.especificacao);
+                const marca = info.confirmado ? '<span class="text-emerald-600 font-bold" title="Confirmado por vocês">✓</span> ' : '';
+                return `<tr class="painel-grupo-row cursor-pointer border-b border-slate-100" data-fundo="${escapeHtml(f.fundo)}" data-chave="${escapeHtml(f.chave)}">
+                    <td class="py-2 px-3 text-slate-700">
+                        ${marca}<span class="font-mono text-slate-400">${escapeHtml(f.chave)}</span> — ${escapeHtml(info.texto)}
+                    </td>
+                    <td class="py-2 px-3 text-right font-medium whitespace-nowrap">${formatarValor(f.saldo)}</td>
                 </tr>`;
             }).join('');
 
@@ -1576,26 +1724,25 @@
                 <table class="w-full text-sm">
                     <thead>
                         <tr class="text-left text-slate-500 border-b-2 border-slate-200">
-                            <th class="py-2 px-3 font-semibold">FUNDO</th>
-                            <th class="py-2 px-3 font-semibold text-right">SALDO LIVRE DISPONÍVEL</th>
-                            <th class="py-2 px-3 font-semibold text-right">SALDO TOTAL</th>
+                            <th class="py-2 px-3 font-semibold">FONTE</th>
+                            <th class="py-2 px-3 font-semibold text-right">SALDO</th>
                         </tr>
                     </thead>
                     <tbody>${linhas}</tbody>
                     <tfoot>
                         <tr class="border-t-2 border-slate-800 font-bold text-slate-900">
                             <td class="py-2.5 px-3">TOTAL</td>
-                            <td class="py-2.5 px-3 text-right text-emerald-800">${formatarValor(totalLivre)}</td>
-                            <td class="py-2.5 px-3 text-right">${formatarValor(totalGeral)}</td>
+                            <td class="py-2.5 px-3 text-right">${formatarValor(total)}</td>
                         </tr>
                     </tfoot>
                 </table>
             `;
 
-            container.querySelectorAll('tr[data-fundo]').forEach(tr => {
+            container.querySelectorAll('tr[data-chave]').forEach(tr => {
                 const fundo = tr.getAttribute('data-fundo');
-                tr.title = `Ver detalhamento de ${fundo} por conta e fonte`;
-                tr.addEventListener('click', () => abrirPainelSaldoFundo(fundo, anoParaExibir, mesSel));
+                const chave = tr.getAttribute('data-chave');
+                tr.title = `Ver detalhamento por conta`;
+                tr.addEventListener('click', () => abrirPainelFonte(fundo, anoParaExibir, mesSel, chave));
             });
         }
 
@@ -1643,12 +1790,14 @@
                     </thead>`;
                     const tbodyPainel = document.createElement('tbody');
                     c.fontes.sort((a, b) => Math.abs(b.saldo) - Math.abs(a.saldo)).forEach(r => {
+                        const info = descricaoFonte(fundo, r.chaveFonte, r.especificacaoFonte);
+                        const marca = info.confirmado ? '<span class="text-emerald-600 font-bold">✓</span> ' : '';
                         const tr = document.createElement('tr');
                         tr.className = 'border-b border-slate-100';
                         tr.innerHTML = `
                             <td class="py-1.5 px-3 text-slate-700">
                                 <span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold mr-1.5 ${r.livre ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}">${r.livre ? 'LIVRE' : 'VINC.'}</span>
-                                <span class="font-mono text-slate-400">${escapeHtml(r.fonte)}</span> — ${escapeHtml(descricaoFonte(r.especificacaoFonte))}
+                                ${marca}<span class="font-mono text-slate-400">${escapeHtml(r.fonte)}</span> — ${escapeHtml(info.texto)}
                             </td>
                             <td class="py-1.5 px-3 text-right font-medium whitespace-nowrap">${formatarValor(r.saldo)}</td>
                         `;
@@ -1666,6 +1815,69 @@
                 const totalDiv = document.createElement('div');
                 totalDiv.className = 'mt-3 pt-3 border-t-2 border-slate-800 flex justify-between font-bold text-slate-900 px-3';
                 totalDiv.innerHTML = `<span>TOTAL — ${escapeHtml(fundo)}</span><span>${formatarValor(totalGeral)}</span>`;
+                contentEl.appendChild(totalDiv);
+            }
+
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+
+            const overlay = document.getElementById('painelOverlay');
+            const painel = document.getElementById('painelLateral');
+            overlay.classList.remove('hidden');
+            requestAnimationFrame(() => {
+                painel.classList.remove('translate-x-full');
+            });
+        }
+
+        // Drawer de uma fonte específica (dentro de um fundo/mês), aberto a partir da tabela
+        // "Outras Fontes" — mostra em quais contas bancárias aquela fonte tem saldo.
+        function abrirPainelFonte(fundo, anoSelecionado, mesIdx, chaveFonte) {
+            const registros = registrosSaldos.filter(r =>
+                r.fundo === fundo && r.mesIdx === mesIdx && r.chaveFonte === chaveFonte &&
+                (!anoSelecionado || r.ano === anoSelecionado));
+
+            const info = registros.length > 0
+                ? descricaoFonte(fundo, chaveFonte, registros[0].especificacaoFonte)
+                : { texto: chaveFonte, confirmado: false };
+
+            document.getElementById('painelTitulo').textContent = `${chaveFonte} — ${info.texto}`;
+            document.getElementById('painelSubtitulo').textContent = `${fundo} • ${anoSelecionado || 'ano não informado'} • ${MESES_NOMES[mesIdx]}`;
+            document.getElementById('painelBreadcrumb').innerHTML = '';
+
+            const contentEl = document.getElementById('painelConteudo');
+            contentEl.innerHTML = '';
+
+            if (registros.length === 0) {
+                contentEl.innerHTML = '<p class="text-slate-400 text-sm text-center py-10">Nenhum saldo encontrado.</p>';
+            } else {
+                let total = 0;
+                const table = document.createElement('table');
+                table.className = 'w-full text-sm';
+                table.innerHTML = `<thead>
+                    <tr class="text-left text-slate-500 border-b-2 border-slate-200">
+                        <th class="py-2 px-3 font-semibold">CONTA</th>
+                        <th class="py-2 px-3 font-semibold text-right">SALDO</th>
+                    </tr>
+                </thead>`;
+                const tbodyPainel = document.createElement('tbody');
+                registros.sort((a, b) => Math.abs(b.saldo) - Math.abs(a.saldo)).forEach(r => {
+                    total += r.saldo;
+                    const tr = document.createElement('tr');
+                    tr.className = 'border-b border-slate-100';
+                    tr.innerHTML = `
+                        <td class="py-2 px-3 text-slate-700">
+                            <div class="font-medium">${escapeHtml(r.nomeConta || r.numConta || '(conta sem nome)')}</div>
+                            <div class="text-xs text-slate-400">${escapeHtml(r.banco || '')}${r.numConta ? ' • conta ' + escapeHtml(r.numConta) : ''}</div>
+                        </td>
+                        <td class="py-2 px-3 text-right font-medium whitespace-nowrap align-top">${formatarValor(r.saldo)}</td>
+                    `;
+                    tbodyPainel.appendChild(tr);
+                });
+                table.appendChild(tbodyPainel);
+                contentEl.appendChild(table);
+
+                const totalDiv = document.createElement('div');
+                totalDiv.className = 'mt-3 pt-3 border-t-2 border-slate-800 flex justify-between font-bold text-slate-900 px-3';
+                totalDiv.innerHTML = `<span>TOTAL — ${escapeHtml(chaveFonte)}</span><span>${formatarValor(total)}</span>`;
                 contentEl.appendChild(totalDiv);
             }
 
