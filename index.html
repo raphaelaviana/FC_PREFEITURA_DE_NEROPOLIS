@@ -147,7 +147,7 @@
             border-bottom-color: #e65100;
         }
 
-        #listaReceitas table, #listaFornecedores table, #listaFolha table {
+        #listaReceitas table, #listaFornecedores table, #listaFolha table, #listaSaldos table {
             border-collapse: collapse;
         }
     </style>
@@ -224,6 +224,10 @@
             <button id="tabBtnIndicadores" onclick="mudarAba('indicadores')" type="button" class="tab-btn">
                 <i data-lucide="bar-chart-3" class="w-4 h-4"></i>
                 Indicadores
+            </button>
+            <button id="tabBtnSaldo" onclick="mudarAba('saldo')" type="button" class="tab-btn">
+                <i data-lucide="landmark" class="w-4 h-4"></i>
+                Saldo em Conta
             </button>
         </div>
     </div>
@@ -314,6 +318,47 @@
                     <p class="text-xs text-blue-200 mt-0.5">Nomes únicos por mês, de Janeiro até o mês selecionado</p>
                 </div>
                 <div id="listaFolha" class="overflow-x-auto"></div>
+            </div>
+
+        </div>
+
+        <!-- ABA: SALDO EM CONTA -->
+        <div id="abaSaldo" class="hidden">
+
+            <div class="flex items-center justify-end mb-4">
+                <div class="flex items-center bg-[#142847] border border-[#2c4d7d] rounded-md px-3 py-1.5 text-xs text-white">
+                    <i data-lucide="calendar-days" class="w-3.5 h-3.5 text-orange-400 mr-2"></i>
+                    <span class="text-slate-300 mr-1.5">Mês de referência:</span>
+                    <select id="selectMesSaldo" onchange="this.dataset.ajustadoPeloUsuario='1'; renderSaldosIndicador()" class="bg-transparent font-bold focus:outline-none cursor-pointer">
+                        <option class="bg-[#142847]" value="0">JANEIRO</option>
+                        <option class="bg-[#142847]" value="1">FEVEREIRO</option>
+                        <option class="bg-[#142847]" value="2">MARÇO</option>
+                        <option class="bg-[#142847]" value="3">ABRIL</option>
+                        <option class="bg-[#142847]" value="4">MAIO</option>
+                        <option class="bg-[#142847]" value="5">JUNHO</option>
+                        <option class="bg-[#142847]" value="6">JULHO</option>
+                        <option class="bg-[#142847]" value="7">AGOSTO</option>
+                        <option class="bg-[#142847]" value="8">SETEMBRO</option>
+                        <option class="bg-[#142847]" value="9">OUTUBRO</option>
+                        <option class="bg-[#142847]" value="10">NOVEMBRO</option>
+                        <option class="bg-[#142847]" value="11">DEZEMBRO</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow-lg overflow-hidden border border-slate-200 mb-4">
+                <div class="bg-[#1b365d] text-white px-4 py-3 border-b-4 border-[#e65100] flex items-start justify-between gap-3">
+                    <div>
+                        <h3 class="text-sm font-bold">SALDO EM CAIXA POR FUNDO</h3>
+                        <p class="text-xs text-blue-200 mt-0.5">Saldo livre disponível (fontes 00, 01 e 02) x saldo total das contas, no mês de referência. Clique num fundo para ver o detalhamento por conta e fonte.</p>
+                    </div>
+                    <button type="button" onclick="alternarLegendaFontes()" class="shrink-0 inline-flex items-center gap-1 text-xs text-blue-200 hover:text-white border border-[#2c4d7d] rounded px-2 py-1 whitespace-nowrap">
+                        <i data-lucide="info" class="w-3.5 h-3.5"></i>
+                        Legenda das fontes
+                    </button>
+                </div>
+                <div id="legendaFontes" class="hidden px-4 py-3 bg-amber-50 border-b border-amber-200 text-xs text-slate-700"></div>
+                <div id="listaSaldos" class="overflow-x-auto"></div>
             </div>
 
         </div>
@@ -532,6 +577,7 @@
         window.addEventListener('load', () => {
             PLANILHAS_FINANCEIRAS.forEach(config => carregarPlanilhaFinanceira(config));
             processarFolha();
+            processarSaldos();
         });
 
         function guardarELerDadosExcel(rows, anoForcado) {
@@ -594,6 +640,14 @@
             selMes.value = String(mesMax);
         }
 
+        function definirMesSaldoPadrao() {
+            const selMes = document.getElementById('selectMesSaldo');
+            if (!selMes || selMes.dataset.ajustadoPeloUsuario === '1') return;
+            if (registrosSaldos.length === 0) return;
+            const mesMax = registrosSaldos.reduce((max, r) => Math.max(max, r.mesIdx), 0);
+            selMes.value = String(mesMax);
+        }
+
         function recalcularEFiltrar() {
             fecharPainel();
 
@@ -636,6 +690,7 @@
             if (statusEl) statusEl.textContent = `Filtrado por: FUNDO = '${fundoSelecionado}', ANO = '${anoSelecionado}'`;
 
             atualizarIndicadores();
+            renderSaldosIndicador();
         }
 
         function podeAbrirPainel(catDescricao, filhoDescricao) {
@@ -977,24 +1032,27 @@
         /* ==================== ABA INDICADORES ==================== */
 
         function mudarAba(aba) {
-            const abaFluxo = document.getElementById('abaFluxoCaixa');
-            const abaIndic = document.getElementById('abaIndicadores');
-            const btnFluxo = document.getElementById('tabBtnFluxo');
-            const btnIndic = document.getElementById('tabBtnIndicadores');
-            if (!abaFluxo || !abaIndic || !btnFluxo || !btnIndic) return;
+            const paineis = {
+                fluxo: { el: document.getElementById('abaFluxoCaixa'), btn: document.getElementById('tabBtnFluxo') },
+                indicadores: { el: document.getElementById('abaIndicadores'), btn: document.getElementById('tabBtnIndicadores') },
+                saldo: { el: document.getElementById('abaSaldo'), btn: document.getElementById('tabBtnSaldo') }
+            };
+            if (!paineis[aba]) return;
 
-            if (aba === 'indicadores') {
-                abaFluxo.classList.add('hidden');
-                abaIndic.classList.remove('hidden');
-                btnFluxo.classList.remove('tab-ativo');
-                btnIndic.classList.add('tab-ativo');
-                atualizarIndicadores();
-            } else {
-                abaIndic.classList.add('hidden');
-                abaFluxo.classList.remove('hidden');
-                btnIndic.classList.remove('tab-ativo');
-                btnFluxo.classList.add('tab-ativo');
-            }
+            Object.keys(paineis).forEach(chave => {
+                const p = paineis[chave];
+                if (!p.el || !p.btn) return;
+                if (chave === aba) {
+                    p.el.classList.remove('hidden');
+                    p.btn.classList.add('tab-ativo');
+                } else {
+                    p.el.classList.add('hidden');
+                    p.btn.classList.remove('tab-ativo');
+                }
+            });
+
+            if (aba === 'indicadores') atualizarIndicadores();
+            if (aba === 'saldo') renderSaldosIndicador();
         }
 
         function obterClassificacoesDespesa(excluir) {
@@ -1021,7 +1079,7 @@
 
             renderReceitasIndicador(fundoSelecionado, anoSelecionado, mesSel);
             renderFornecedoresIndicador(fundoSelecionado, anoSelecionado);
-            renderFolhaIndicador(fundoSelecionado, mesSel);
+            renderFolhaIndicador(fundoSelecionado, anoSelecionado, mesSel);
         }
 
         function renderReceitasIndicador(fundoSelecionado, anoSelecionado, mesSel) {
@@ -1164,6 +1222,7 @@
             const headerNorm = rows[0].map(normalizarTexto);
             const colFundo = localizarColuna(headerNorm, ['FUNDO'], []);
             const colMes = localizarColuna(headerNorm, ['MES'], []);
+            const colAno = localizarColuna(headerNorm, ['ANO'], []);
             const colNome = localizarColuna(headerNorm, ['NOME'], []);
             const colSecretaria = localizarColuna(headerNorm, ['SECRETARIA'], []);
 
@@ -1186,6 +1245,7 @@
                     if (!fundo || !nome) return;
 
                     const mesIdx = resolverMesIdx(colMes >= 0 ? row[colMes] : null, null);
+                    const ano = colAno >= 0 ? String(row[colAno] || '').trim() : '';
                     const secretariaRaw = colSecretaria >= 0 ? String(row[colSecretaria] || '').trim() : '';
 
                     let secretariaCodigo = secretariaRaw;
@@ -1200,7 +1260,7 @@
                     const mapaLabel = contagemRotulo.get(secretariaCodigo);
                     mapaLabel.set(secretariaLabel, (mapaLabel.get(secretariaLabel) || 0) + 1);
 
-                    registrosFolha.push({ fundo, mesIdx, nome, secretariaCodigo });
+                    registrosFolha.push({ fundo, mesIdx, ano, nome, secretariaCodigo });
                 } catch (e) {
                     console.warn('Linha da folha ignorada por erro de leitura:', idx, e);
                 }
@@ -1218,7 +1278,7 @@
             atualizarIndicadores();
         }
 
-        function renderFolhaIndicador(fundoSelecionado, mesSel) {
+        function renderFolhaIndicador(fundoSelecionado, anoSelecionado, mesSel) {
             const container = document.getElementById('listaFolha');
             if (!container) return;
 
@@ -1239,6 +1299,9 @@
             const porSecretaria = new Map();
             registrosFolha.forEach(reg => {
                 if (reg.mesIdx > mesSel) return;
+                // Registros sem ANO preenchido (planilhas antigas) não são filtrados por ano,
+                // para não sumir dados de quem ainda não atualizou a planilha.
+                if (reg.ano && anoSelecionado !== 'TODOS' && reg.ano !== anoSelecionado) return;
                 if (!fundoCorresponde(reg.fundo, fundoSelecionado)) return;
 
                 if (!porSecretaria.has(reg.secretariaCodigo)) {
@@ -1291,6 +1354,329 @@
                     </tfoot>
                 </table>
             `;
+        }
+
+        /* ---------- Saldo em Conta por Fundo (planilha separada) ---------- */
+
+        let registrosSaldos = [];
+        let erroSaldos = null;
+
+        // Legenda das fontes de recursos, montada por pesquisa sobre o padrão de
+        // codificação usado por municípios de Goiás (TCM-GO). Não foi possível acessar
+        // automaticamente a tabela oficial do TCM-GO (o site bloqueia acesso automatizado
+        // a esse arquivo), então esta legenda é uma referência de melhor esforço — os
+        // itens marcados "a confirmar"/"provável" têm menos certeza e vale a pena
+        // confirmar com o contador ou o controle interno.
+        const LEGENDA_FONTES = {
+            '00': 'Recursos livres / não vinculados',
+            '01': 'Recursos livres / não vinculados',
+            '02': 'Recursos livres / não vinculados',
+            '03': 'Recursos vinculados — código 03 (a confirmar)',
+            '06': 'Recursos vinculados — código 06 (a confirmar)',
+            '07': 'Transferências do FNDE — educação (provável: PNAE/PNATE/PDDE)',
+            '09': 'Recursos vinculados — código 09 (a confirmar)',
+            '15': 'Transferências do SUS — saúde (provável)',
+            '16': 'Transferências do Fundo Nacional de Assistência Social — FNAS (provável)',
+            '17': 'Transferências de convênios (provável)',
+            '18': 'FUNDEB — impostos vinculados (provável)',
+            '19': 'FUNDEB — complementação da União (provável)',
+            '20': 'Recursos vinculados — código 20 (a confirmar)',
+            '24': 'Recursos vinculados — código 24 (a confirmar)',
+            '29': 'Operações de crédito (provável)',
+            '31': 'Transferências do FNDE — educação (provável)',
+            '32': 'Convênios de educação (provável)',
+            '34': 'Convênios de assistência social (provável)',
+            '36': 'CIDE / contribuições vinculadas (a confirmar)',
+            '37': 'FUNDEB — recursos vinculados (provável)',
+            '44': 'Transferências do SUS — bloco de custeio (provável)',
+            '49': 'Outras transferências vinculadas (a confirmar)',
+            '50': 'Convênios com a União (a confirmar)',
+            '51': 'Convênios com o Estado (a confirmar)',
+            '52': 'Convênios com Município/outros entes (a confirmar)',
+            '70': 'FUNDEB — complementação da União (VAAT/VAAF) (provável)',
+            '71': 'Recursos vinculados — código 71 (a confirmar)',
+            '80': 'Recursos vinculados — código 80 (a confirmar)',
+            '81': 'Alienação de bens (provável)',
+            '83': 'Recursos vinculados — código 83 (a confirmar)',
+            '84': 'Recursos vinculados — código 84 (a confirmar)',
+            '92': 'Recursos vinculados — código 92 (a confirmar)'
+        };
+
+        function classificarFonte(fonteRaw) {
+            const texto = String(fonteRaw || '').trim();
+            const partes = texto.split('.');
+            const especificacao = partes.length > 1 ? partes[1] : partes[0];
+            const livre = ['00', '01', '02'].includes(especificacao);
+            return { texto, especificacao, livre };
+        }
+
+        function descricaoFonte(especificacao) {
+            return LEGENDA_FONTES[especificacao] || `Fonte vinculada — código ${especificacao} (a confirmar)`;
+        }
+
+        const SHEET_ID_SALDOS = '10TUzZq7OqC71bxmHvIP3p5IkWUgy5O3S';
+
+        async function processarSaldos() {
+            try {
+                const r = await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID_SALDOS}/gviz/tq?tqx=out:json`);
+                if (!r.ok) {
+                    throw new Error(`Falha HTTP ${r.status} ao buscar a planilha de saldos por fundo. Verifique se ela está compartilhada como "Qualquer pessoa com o link pode visualizar".`);
+                }
+                const t = await r.text();
+                const rows = parseRespostaGviz(t);
+                guardarELerDadosSaldos(rows);
+            } catch (e) {
+                console.warn('Não foi possível carregar os saldos por fundo:', e);
+                erroSaldos = String((e && e.message) || e);
+                renderSaldosIndicador();
+            }
+        }
+
+        function guardarELerDadosSaldos(rows) {
+            erroSaldos = null;
+
+            if (!rows || rows.length < 2) {
+                erroSaldos = 'A planilha de saldos por fundo voltou sem linhas de dados.';
+                renderSaldosIndicador();
+                return;
+            }
+
+            const headerNorm = rows[0].map(normalizarTexto);
+            const colFundo = localizarColuna(headerNorm, ['FUNDO'], []);
+            const colMes = localizarColuna(headerNorm, ['MES'], []);
+            const colAno = localizarColuna(headerNorm, ['ANO'], []);
+            const colBanco = localizarColuna(headerNorm, ['BANCO'], []);
+            const colNumConta = localizarColuna(headerNorm, ['N° DA CONTA', 'Nº DA CONTA', 'N DA CONTA'], ['NUMERO DA CONTA']);
+            const colNomeConta = localizarColuna(headerNorm, ['NOME DA CONTA'], []);
+            const colFonte = localizarColuna(headerNorm, ['FONTE'], []);
+            const colAnterior = localizarColuna(headerNorm, ['ANTERIOR'], []);
+            const colCredito = localizarColuna(headerNorm, ['CREDITO'], []);
+            const colDebito = localizarColuna(headerNorm, ['DEBITO'], []);
+            const colSaldo = localizarColuna(headerNorm, ['SALDO'], []);
+
+            if (colFundo < 0 || colFonte < 0 || colSaldo < 0) {
+                const colunasEncontradas = rows[0].map(v => String(v || '').trim()).filter(Boolean).join(', ') || '(nenhuma)';
+                erroSaldos = `Não encontrei as colunas FUNDO, FONTE e/ou SALDO na planilha de saldos por fundo. Colunas encontradas na primeira linha: ${colunasEncontradas}`;
+                registrosSaldos = [];
+                renderSaldosIndicador();
+                return;
+            }
+
+            registrosSaldos = [];
+
+            rows.forEach((row, idx) => {
+                if (idx === 0 || !row || row.length === 0) return;
+                try {
+                    const fundo = String(row[colFundo] || '').trim().toUpperCase();
+                    if (!fundo) return;
+
+                    const mesIdx = resolverMesIdx(colMes >= 0 ? row[colMes] : null, null);
+                    const ano = colAno >= 0 ? String(row[colAno] || '').trim() : '';
+                    const banco = colBanco >= 0 ? String(row[colBanco] || '').trim() : '';
+                    const numConta = colNumConta >= 0 ? String(row[colNumConta] || '').trim() : '';
+                    const nomeConta = colNomeConta >= 0 ? String(row[colNomeConta] || '').trim() : '';
+                    const fonteInfo = classificarFonte(row[colFonte]);
+                    const saldo = parseNumero(row[colSaldo]);
+                    const anterior = colAnterior >= 0 ? parseNumero(row[colAnterior]) : 0;
+                    const credito = colCredito >= 0 ? parseNumero(row[colCredito]) : 0;
+                    const debito = colDebito >= 0 ? parseNumero(row[colDebito]) : 0;
+
+                    registrosSaldos.push({
+                        fundo, mesIdx, ano, banco, numConta, nomeConta,
+                        fonte: fonteInfo.texto, especificacaoFonte: fonteInfo.especificacao, livre: fonteInfo.livre,
+                        anterior, credito, debito, saldo
+                    });
+                } catch (e) {
+                    console.warn('Linha de saldo por fundo ignorada por erro de leitura:', idx, e);
+                }
+            });
+
+            definirMesSaldoPadrao();
+            renderSaldosIndicador();
+        }
+
+        function alternarLegendaFontes() {
+            const el = document.getElementById('legendaFontes');
+            if (!el) return;
+            if (!el.classList.contains('hidden')) {
+                el.classList.add('hidden');
+                return;
+            }
+
+            const codigos = Array.from(new Set(registrosSaldos.map(r => r.especificacaoFonte))).sort();
+            const itens = (codigos.length > 0 ? codigos : Object.keys(LEGENDA_FONTES)).map(cod =>
+                `<div class="py-1"><span class="font-mono font-bold text-slate-900">${escapeHtml(cod)}</span> — ${escapeHtml(descricaoFonte(cod))}</div>`
+            ).join('');
+
+            el.innerHTML = `
+                <p class="mb-2">Legenda montada por pesquisa sobre o padrão de fontes de recursos usado por municípios de Goiás — não confirmada automaticamente contra a tabela oficial do TCM-GO. Itens marcados "a confirmar"/"provável" merecem revisão.</p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6">${itens}</div>
+            `;
+            el.classList.remove('hidden');
+        }
+
+        function renderSaldosIndicador() {
+            const container = document.getElementById('listaSaldos');
+            if (!container) return;
+
+            const anoSelecionado = document.getElementById('selectAno').value.toUpperCase();
+            const selMes = document.getElementById('selectMesSaldo');
+            const mesSel = selMes ? parseInt(selMes.value, 10) : 0;
+
+            if (erroSaldos) {
+                container.innerHTML = `<p class="text-red-500 text-sm text-center py-6 px-4">Não foi possível carregar os saldos por fundo.<br>${escapeHtml(erroSaldos)}</p>`;
+                return;
+            }
+
+            if (registrosSaldos.length === 0) {
+                container.innerHTML = '<p class="text-slate-400 text-sm text-center py-6">Dados de saldo por fundo ainda não carregados ou indisponíveis.</p>';
+                return;
+            }
+
+            // Saldo é uma posição (estoque), não um fluxo acumulável — por isso filtramos
+            // pelo mês exato selecionado (e não "até o mês", como nas receitas/despesas).
+            let anoParaExibir = anoSelecionado;
+            if (anoParaExibir === 'TODOS') {
+                const anosDisponiveis = registrosSaldos
+                    .filter(r => r.mesIdx === mesSel)
+                    .map(r => r.ano)
+                    .filter(Boolean);
+                anoParaExibir = anosDisponiveis.length > 0 ? anosDisponiveis.sort().slice(-1)[0] : '';
+            }
+
+            const registrosDoMes = registrosSaldos.filter(r => r.mesIdx === mesSel && (!anoParaExibir || r.ano === anoParaExibir));
+
+            if (registrosDoMes.length === 0) {
+                container.innerHTML = `<p class="text-slate-400 text-sm text-center py-6">Nenhum saldo encontrado para ${MESES_NOMES[mesSel]}${anoParaExibir ? ' de ' + anoParaExibir : ''}.</p>`;
+                return;
+            }
+
+            const porFundo = new Map();
+            registrosDoMes.forEach(r => {
+                if (!porFundo.has(r.fundo)) porFundo.set(r.fundo, { fundo: r.fundo, livre: 0, total: 0 });
+                const g = porFundo.get(r.fundo);
+                g.total += r.saldo;
+                if (r.livre) g.livre += r.saldo;
+            });
+
+            const lista = Array.from(porFundo.values()).sort((a, b) => b.total - a.total);
+
+            let totalLivre = 0, totalGeral = 0;
+            const linhas = lista.map(g => {
+                totalLivre += g.livre;
+                totalGeral += g.total;
+                return `<tr class="painel-grupo-row cursor-pointer border-b border-slate-100" data-fundo="${escapeHtml(g.fundo)}">
+                    <td class="py-2 px-3 text-slate-700 font-medium">${escapeHtml(g.fundo)}</td>
+                    <td class="py-2 px-3 text-right font-semibold whitespace-nowrap text-emerald-700">${formatarValor(g.livre)}</td>
+                    <td class="py-2 px-3 text-right whitespace-nowrap">${formatarValor(g.total)}</td>
+                </tr>`;
+            }).join('');
+
+            container.innerHTML = `
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-slate-500 border-b-2 border-slate-200">
+                            <th class="py-2 px-3 font-semibold">FUNDO</th>
+                            <th class="py-2 px-3 font-semibold text-right">SALDO LIVRE DISPONÍVEL</th>
+                            <th class="py-2 px-3 font-semibold text-right">SALDO TOTAL</th>
+                        </tr>
+                    </thead>
+                    <tbody>${linhas}</tbody>
+                    <tfoot>
+                        <tr class="border-t-2 border-slate-800 font-bold text-slate-900">
+                            <td class="py-2.5 px-3">TOTAL</td>
+                            <td class="py-2.5 px-3 text-right text-emerald-800">${formatarValor(totalLivre)}</td>
+                            <td class="py-2.5 px-3 text-right">${formatarValor(totalGeral)}</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            `;
+
+            container.querySelectorAll('tr[data-fundo]').forEach(tr => {
+                const fundo = tr.getAttribute('data-fundo');
+                tr.title = `Ver detalhamento de ${fundo} por conta e fonte`;
+                tr.addEventListener('click', () => abrirPainelSaldoFundo(fundo, anoParaExibir, mesSel));
+            });
+        }
+
+        function abrirPainelSaldoFundo(fundo, anoSelecionado, mesIdx) {
+            const registros = registrosSaldos.filter(r => r.fundo === fundo && r.mesIdx === mesIdx && (!anoSelecionado || r.ano === anoSelecionado));
+
+            document.getElementById('painelTitulo').textContent = `Saldo em Conta — ${fundo}`;
+            document.getElementById('painelSubtitulo').textContent = `${anoSelecionado || 'ano não informado'} • ${MESES_NOMES[mesIdx]}`;
+            document.getElementById('painelBreadcrumb').innerHTML = '';
+
+            const contentEl = document.getElementById('painelConteudo');
+            contentEl.innerHTML = '';
+
+            if (registros.length === 0) {
+                contentEl.innerHTML = '<p class="text-slate-400 text-sm text-center py-10">Nenhum saldo encontrado.</p>';
+            } else {
+                const porConta = new Map();
+                registros.forEach(r => {
+                    const chave = r.nomeConta || r.numConta || '(conta sem nome)';
+                    if (!porConta.has(chave)) porConta.set(chave, { nomeConta: chave, banco: r.banco, numConta: r.numConta, fontes: [], subtotal: 0 });
+                    const c = porConta.get(chave);
+                    c.fontes.push(r);
+                    c.subtotal += r.saldo;
+                });
+
+                let totalGeral = 0;
+                Array.from(porConta.values()).sort((a, b) => b.subtotal - a.subtotal).forEach(c => {
+                    totalGeral += c.subtotal;
+
+                    const contaHeader = document.createElement('div');
+                    contaHeader.className = 'mt-4 mb-1 px-1';
+                    contaHeader.innerHTML = `
+                        <div class="font-bold text-slate-900 text-sm">${escapeHtml(c.nomeConta)}</div>
+                        <div class="text-xs text-slate-400">${escapeHtml(c.banco || '')}${c.numConta ? ' • conta ' + escapeHtml(c.numConta) : ''}</div>
+                    `;
+                    contentEl.appendChild(contaHeader);
+
+                    const table = document.createElement('table');
+                    table.className = 'w-full text-xs mb-2';
+                    table.innerHTML = `<thead>
+                        <tr class="text-left text-slate-500 border-b border-slate-200">
+                            <th class="py-1.5 px-3 font-semibold">FONTE</th>
+                            <th class="py-1.5 px-3 font-semibold text-right">SALDO</th>
+                        </tr>
+                    </thead>`;
+                    const tbodyPainel = document.createElement('tbody');
+                    c.fontes.sort((a, b) => Math.abs(b.saldo) - Math.abs(a.saldo)).forEach(r => {
+                        const tr = document.createElement('tr');
+                        tr.className = 'border-b border-slate-100';
+                        tr.innerHTML = `
+                            <td class="py-1.5 px-3 text-slate-700">
+                                <span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold mr-1.5 ${r.livre ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}">${r.livre ? 'LIVRE' : 'VINC.'}</span>
+                                <span class="font-mono text-slate-400">${escapeHtml(r.fonte)}</span> — ${escapeHtml(descricaoFonte(r.especificacaoFonte))}
+                            </td>
+                            <td class="py-1.5 px-3 text-right font-medium whitespace-nowrap">${formatarValor(r.saldo)}</td>
+                        `;
+                        tbodyPainel.appendChild(tr);
+                    });
+                    table.appendChild(tbodyPainel);
+                    contentEl.appendChild(table);
+
+                    const subtotalDiv = document.createElement('div');
+                    subtotalDiv.className = 'flex justify-between text-xs font-semibold text-slate-700 px-3 pb-2';
+                    subtotalDiv.innerHTML = `<span>Subtotal da conta</span><span>${formatarValor(c.subtotal)}</span>`;
+                    contentEl.appendChild(subtotalDiv);
+                });
+
+                const totalDiv = document.createElement('div');
+                totalDiv.className = 'mt-3 pt-3 border-t-2 border-slate-800 flex justify-between font-bold text-slate-900 px-3';
+                totalDiv.innerHTML = `<span>TOTAL — ${escapeHtml(fundo)}</span><span>${formatarValor(totalGeral)}</span>`;
+                contentEl.appendChild(totalDiv);
+            }
+
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+
+            const overlay = document.getElementById('painelOverlay');
+            const painel = document.getElementById('painelLateral');
+            overlay.classList.remove('hidden');
+            requestAnimationFrame(() => {
+                painel.classList.remove('translate-x-full');
+            });
         }
 
         recalcularEFiltrar();
