@@ -147,7 +147,31 @@
             border-bottom-color: #e65100;
         }
 
-        #listaReceitas table, #listaFornecedores table, #listaFolha table, #listaSaldos table, #listaOutrasFontes table {
+        .emenda-tipo-btn {
+            display: inline-flex;
+            align-items: center;
+            padding: 8px 16px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: #475569;
+            background: #f1f5f9;
+            border: 1px solid #e2e8f0;
+            border-radius: 999px;
+            cursor: pointer;
+            transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+        }
+
+        .emenda-tipo-btn:hover {
+            background: #e2e8f0;
+        }
+
+        .emenda-tipo-btn.emenda-tipo-ativo {
+            color: #ffffff;
+            background: #1b365d;
+            border-color: #1b365d;
+        }
+
+        #listaReceitas table, #listaFornecedores table, #listaFolha table, #listaSaldos table, #listaOutrasFontes table, #listaEmendas table {
             border-collapse: collapse;
         }
     </style>
@@ -228,6 +252,10 @@
             <button id="tabBtnSaldo" onclick="mudarAba('saldo')" type="button" class="tab-btn">
                 <i data-lucide="landmark" class="w-4 h-4"></i>
                 Saldo em Conta
+            </button>
+            <button id="tabBtnEmendas" onclick="mudarAba('emendas')" type="button" class="tab-btn">
+                <i data-lucide="handshake" class="w-4 h-4"></i>
+                Emendas
             </button>
         </div>
     </div>
@@ -367,6 +395,41 @@
                     <p class="text-xs text-blue-200 mt-0.5">Segue o filtro de Fundo selecionado no topo da página, no mês de referência. Clique numa fonte para ver o detalhamento por conta.</p>
                 </div>
                 <div id="listaOutrasFontes" class="overflow-x-auto"></div>
+            </div>
+
+        </div>
+
+        <!-- ABA: EMENDAS -->
+        <div id="abaEmendas" class="hidden">
+
+            <div class="flex flex-wrap items-center gap-2 mb-4">
+                <button type="button" class="emenda-tipo-btn emenda-tipo-ativo" data-tipo="FEDERAL" onclick="mudarTipoEmenda('FEDERAL')">Federais</button>
+                <button type="button" class="emenda-tipo-btn" data-tipo="ESTADUAL" onclick="mudarTipoEmenda('ESTADUAL')">Estaduais</button>
+                <button type="button" class="emenda-tipo-btn" data-tipo="MUNICIPAL" onclick="mudarTipoEmenda('MUNICIPAL')">Municipais</button>
+                <button type="button" class="emenda-tipo-btn" data-tipo="IMPOSITIVA" onclick="mudarTipoEmenda('IMPOSITIVA')">Impositivas</button>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+                <div class="bg-white rounded-lg shadow-lg border border-slate-200 px-4 py-3">
+                    <p class="text-xs text-slate-500 font-semibold">QUANTIDADE DE EMENDAS</p>
+                    <p class="text-2xl font-bold text-slate-900 mt-1" id="statEmendasQtd">-</p>
+                </div>
+                <div class="bg-white rounded-lg shadow-lg border border-slate-200 px-4 py-3">
+                    <p class="text-xs text-slate-500 font-semibold">TOTAL PREVISTO</p>
+                    <p class="text-2xl font-bold text-slate-900 mt-1" id="statEmendasPrevisto">-</p>
+                </div>
+                <div class="bg-white rounded-lg shadow-lg border border-slate-200 px-4 py-3">
+                    <p class="text-xs text-slate-500 font-semibold">TOTAL RECEBIDO</p>
+                    <p class="text-2xl font-bold text-emerald-700 mt-1" id="statEmendasRecebido">-</p>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow-lg overflow-hidden border border-slate-200 mb-4">
+                <div class="bg-[#1b365d] text-white px-4 py-3 border-b-4 border-[#e65100]">
+                    <h3 class="text-sm font-bold" id="tituloEmendas">EMENDAS FEDERAIS</h3>
+                    <p class="text-xs text-blue-200 mt-0.5">Segue o filtro de Ano selecionado no topo da página. Clique numa emenda para ver todos os detalhes.</p>
+                </div>
+                <div id="listaEmendas" class="overflow-x-auto"></div>
             </div>
 
         </div>
@@ -586,6 +649,7 @@
             PLANILHAS_FINANCEIRAS.forEach(config => carregarPlanilhaFinanceira(config));
             processarFolha();
             processarSaldos();
+            processarEmendas();
         });
 
         function guardarELerDadosExcel(rows, anoForcado) {
@@ -699,6 +763,7 @@
 
             atualizarIndicadores();
             renderSaldosIndicador();
+            renderEmendas();
         }
 
         function podeAbrirPainel(catDescricao, filhoDescricao) {
@@ -1043,7 +1108,8 @@
             const paineis = {
                 fluxo: { el: document.getElementById('abaFluxoCaixa'), btn: document.getElementById('tabBtnFluxo') },
                 indicadores: { el: document.getElementById('abaIndicadores'), btn: document.getElementById('tabBtnIndicadores') },
-                saldo: { el: document.getElementById('abaSaldo'), btn: document.getElementById('tabBtnSaldo') }
+                saldo: { el: document.getElementById('abaSaldo'), btn: document.getElementById('tabBtnSaldo') },
+                emendas: { el: document.getElementById('abaEmendas'), btn: document.getElementById('tabBtnEmendas') }
             };
             if (!paineis[aba]) return;
 
@@ -1061,6 +1127,7 @@
 
             if (aba === 'indicadores') atualizarIndicadores();
             if (aba === 'saldo') renderSaldosIndicador();
+            if (aba === 'emendas') renderEmendas();
         }
 
         function obterClassificacoesDespesa(excluir) {
@@ -1880,6 +1947,267 @@
                 totalDiv.innerHTML = `<span>TOTAL — ${escapeHtml(chaveFonte)}</span><span>${formatarValor(total)}</span>`;
                 contentEl.appendChild(totalDiv);
             }
+
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+
+            const overlay = document.getElementById('painelOverlay');
+            const painel = document.getElementById('painelLateral');
+            overlay.classList.remove('hidden');
+            requestAnimationFrame(() => {
+                painel.classList.remove('translate-x-full');
+            });
+        }
+
+        /* ---------- Emendas (planilha separada) ---------- */
+
+        const SHEET_ID_EMENDAS = '1RvoRanIkJEGws3_UcrifZ0w0Jp4_4L0T';
+        let registrosEmendas = [];
+        let erroEmendas = null;
+        let tipoEmendaAtivo = 'FEDERAL';
+        const ROTULOS_TIPO_EMENDA = { FEDERAL: 'Federais', ESTADUAL: 'Estaduais', MUNICIPAL: 'Municipais', IMPOSITIVA: 'Impositivas' };
+
+        // A planilha traz Federais/Estaduais/Municipais (e no futuro Impositivas) todas juntas,
+        // diferenciadas pela coluna Origem — não são fontes separadas.
+        function normalizarTipoEmenda(origemRaw) {
+            const t = normalizarTexto(origemRaw);
+            if (t.includes('FEDERAL')) return 'FEDERAL';
+            if (t.includes('ESTADUAL')) return 'ESTADUAL';
+            if (t.includes('MUNICIPAL')) return 'MUNICIPAL';
+            if (t.includes('IMPOSITIV')) return 'IMPOSITIVA';
+            return t || 'OUTRA';
+        }
+
+        async function processarEmendas() {
+            try {
+                const r = await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID_EMENDAS}/gviz/tq?tqx=out:json`);
+                if (!r.ok) {
+                    throw new Error(`Falha HTTP ${r.status} ao buscar a planilha de emendas. Verifique se ela está compartilhada como "Qualquer pessoa com o link pode visualizar".`);
+                }
+                const t = await r.text();
+                const rows = parseRespostaGviz(t);
+                guardarELerDadosEmendas(rows);
+            } catch (e) {
+                console.warn('Não foi possível carregar as emendas:', e);
+                erroEmendas = String((e && e.message) || e);
+                renderEmendas();
+            }
+        }
+
+        function guardarELerDadosEmendas(rows) {
+            erroEmendas = null;
+
+            if (!rows || rows.length < 2) {
+                erroEmendas = 'A planilha de emendas voltou sem linhas de dados.';
+                renderEmendas();
+                return;
+            }
+
+            const headerNorm = rows[0].map(normalizarTexto);
+            const colNumero = localizarColuna(headerNorm, ['NUMERO'], []);
+            const colAno = localizarColuna(headerNorm, ['ANO'], []);
+            const colTipoEmenda = localizarColuna(headerNorm, ['TIPO DE EMENDA'], ['TIPO EMENDA']);
+            const colAutoria = localizarColuna(headerNorm, ['AUTORIA'], []);
+            const colPartido = localizarColuna(headerNorm, ['PARTIDO'], []);
+            const colFuncao = localizarColuna(headerNorm, ['FUNCAO DE GOVERNO'], ['FUNCAO']);
+            const colOrigem = localizarColuna(headerNorm, ['ORIGEM'], []);
+            const colValorPrevisto = localizarColuna(headerNorm, ['VALOR PREVISTO'], []);
+            const colValorRecebido = localizarColuna(headerNorm, ['VALOR RECEBIDO'], []);
+            const colContrapartida = localizarColuna(headerNorm, ['CONTRAPARTIDA'], []);
+            const colStatus = localizarColuna(headerNorm, ['STATUS DE EXECUCAO'], ['STATUS']);
+            const colFormaRepasse = localizarColuna(headerNorm, ['FORMA DE REPASSE'], ['FORMA REPASSE']);
+            const colAtoNormativo = localizarColuna(headerNorm, ['ATO NORMATIVO'], []);
+            const colResponsavel = localizarColuna(headerNorm, ['RESPONSAVEL PELA EXECUCAO'], ['RESPONSAVEL']);
+            const colObjeto = localizarColuna(headerNorm, ['OBJETO'], []);
+            const colLocalidade = localizarColuna(headerNorm, ['LOCALIDADE BENEFICIADA/BAIRRO'], ['LOCALIDADE']);
+            const colDespesas = localizarColuna(headerNorm, ['DESPESAS'], []);
+
+            if (colOrigem < 0 || (colValorPrevisto < 0 && colValorRecebido < 0)) {
+                const colunasEncontradas = rows[0].map(v => String(v || '').trim()).filter(Boolean).join(', ') || '(nenhuma)';
+                erroEmendas = `Não encontrei a coluna ORIGEM e/ou as colunas de valor na planilha de emendas. Colunas encontradas na primeira linha: ${colunasEncontradas}`;
+                registrosEmendas = [];
+                renderEmendas();
+                return;
+            }
+
+            registrosEmendas = [];
+
+            rows.forEach((row, idx) => {
+                if (idx === 0 || !row || row.length === 0) return;
+                try {
+                    const origemBruta = colOrigem >= 0 ? String(row[colOrigem] || '').trim() : '';
+                    if (!origemBruta) return;
+
+                    registrosEmendas.push({
+                        numero: colNumero >= 0 ? String(row[colNumero] || '').trim() : '',
+                        ano: colAno >= 0 ? String(row[colAno] || '').trim() : '',
+                        tipoEmendaDetalhe: colTipoEmenda >= 0 ? String(row[colTipoEmenda] || '').trim() : '',
+                        autoria: colAutoria >= 0 ? String(row[colAutoria] || '').trim() : '',
+                        partido: colPartido >= 0 ? String(row[colPartido] || '').trim() : '',
+                        funcao: colFuncao >= 0 ? String(row[colFuncao] || '').trim() : '',
+                        origemBruta,
+                        tipo: normalizarTipoEmenda(origemBruta),
+                        valorPrevisto: colValorPrevisto >= 0 ? parseNumero(row[colValorPrevisto]) : 0,
+                        valorRecebido: colValorRecebido >= 0 ? parseNumero(row[colValorRecebido]) : 0,
+                        contrapartida: colContrapartida >= 0 ? parseNumero(row[colContrapartida]) : 0,
+                        status: colStatus >= 0 ? String(row[colStatus] || '').trim() : '',
+                        formaRepasse: colFormaRepasse >= 0 ? String(row[colFormaRepasse] || '').trim() : '',
+                        atoNormativo: colAtoNormativo >= 0 ? String(row[colAtoNormativo] || '').trim() : '',
+                        responsavel: colResponsavel >= 0 ? String(row[colResponsavel] || '').trim() : '',
+                        objeto: colObjeto >= 0 ? String(row[colObjeto] || '').trim() : '',
+                        localidade: colLocalidade >= 0 ? String(row[colLocalidade] || '').trim() : '',
+                        despesas: colDespesas >= 0 ? parseNumero(row[colDespesas]) : 0
+                    });
+                } catch (e) {
+                    console.warn('Linha de emenda ignorada por erro de leitura:', idx, e);
+                }
+            });
+
+            renderEmendas();
+        }
+
+        function mudarTipoEmenda(tipo) {
+            tipoEmendaAtivo = tipo;
+            document.querySelectorAll('.emenda-tipo-btn').forEach(btn => {
+                btn.classList.toggle('emenda-tipo-ativo', btn.getAttribute('data-tipo') === tipo);
+            });
+            renderEmendas();
+        }
+
+        function renderEmendas() {
+            const container = document.getElementById('listaEmendas');
+            if (!container) return;
+
+            const tituloEl = document.getElementById('tituloEmendas');
+            const statQtd = document.getElementById('statEmendasQtd');
+            const statPrevisto = document.getElementById('statEmendasPrevisto');
+            const statRecebido = document.getElementById('statEmendasRecebido');
+            const rotulo = ROTULOS_TIPO_EMENDA[tipoEmendaAtivo] || tipoEmendaAtivo;
+            if (tituloEl) tituloEl.textContent = `EMENDAS ${rotulo.toUpperCase()}`;
+
+            // Atualiza a contagem em cada aba-pílula, para dar uma visão rápida sem precisar clicar.
+            Object.keys(ROTULOS_TIPO_EMENDA).forEach(tipo => {
+                const btn = document.querySelector(`.emenda-tipo-btn[data-tipo="${tipo}"]`);
+                if (!btn) return;
+                const qtd = registrosEmendas.filter(r => r.tipo === tipo).length;
+                btn.textContent = `${ROTULOS_TIPO_EMENDA[tipo]} (${qtd})`;
+            });
+
+            if (erroEmendas) {
+                container.innerHTML = `<p class="text-red-500 text-sm text-center py-6 px-4">Não foi possível carregar as emendas.<br>${escapeHtml(erroEmendas)}</p>`;
+                if (statQtd) statQtd.textContent = '-';
+                if (statPrevisto) statPrevisto.textContent = '-';
+                if (statRecebido) statRecebido.textContent = '-';
+                return;
+            }
+
+            if (registrosEmendas.length === 0) {
+                container.innerHTML = '<p class="text-slate-400 text-sm text-center py-6">Dados de emendas ainda não carregados ou indisponíveis.</p>';
+                if (statQtd) statQtd.textContent = '-';
+                if (statPrevisto) statPrevisto.textContent = '-';
+                if (statRecebido) statRecebido.textContent = '-';
+                return;
+            }
+
+            const anoSelecionado = document.getElementById('selectAno').value.toUpperCase();
+            const filtradas = registrosEmendas.filter(r =>
+                r.tipo === tipoEmendaAtivo && (anoSelecionado === 'TODOS' || !r.ano || r.ano === anoSelecionado));
+
+            if (filtradas.length === 0) {
+                const semFonte = !registrosEmendas.some(r => r.tipo === tipoEmendaAtivo);
+                container.innerHTML = semFonte
+                    ? `<p class="text-slate-400 text-sm text-center py-6">Ainda não há emendas ${rotulo.toLowerCase()} na planilha.</p>`
+                    : `<p class="text-slate-400 text-sm text-center py-6">Nenhuma emenda ${rotulo.toLowerCase()} encontrada para o ano selecionado.</p>`;
+                if (statQtd) statQtd.textContent = '0';
+                if (statPrevisto) statPrevisto.textContent = formatarValor(0);
+                if (statRecebido) statRecebido.textContent = formatarValor(0);
+                return;
+            }
+
+            const totalPrevisto = filtradas.reduce((s, r) => s + r.valorPrevisto, 0);
+            const totalRecebido = filtradas.reduce((s, r) => s + r.valorRecebido, 0);
+            if (statQtd) statQtd.textContent = String(filtradas.length);
+            if (statPrevisto) statPrevisto.textContent = formatarValor(totalPrevisto);
+            if (statRecebido) statRecebido.textContent = formatarValor(totalRecebido);
+
+            const ordenadas = [...filtradas].sort((a, b) => (b.ano || '').localeCompare(a.ano || '') || b.valorRecebido - a.valorRecebido);
+
+            const linhas = ordenadas.map((r, idx) => `
+                <tr class="painel-grupo-row cursor-pointer border-b border-slate-100" data-idx="${idx}">
+                    <td class="py-2 px-3 text-slate-500 whitespace-nowrap">${escapeHtml(r.ano || '-')}</td>
+                    <td class="py-2 px-3 text-slate-700 font-medium">${escapeHtml(r.autoria || '-')}</td>
+                    <td class="py-2 px-3 text-slate-500 whitespace-nowrap">${escapeHtml(r.partido || '-')}</td>
+                    <td class="py-2 px-3 text-slate-500">${escapeHtml(r.funcao || '-')}</td>
+                    <td class="py-2 px-3 text-slate-500 whitespace-nowrap">${escapeHtml(r.status || '-')}</td>
+                    <td class="py-2 px-3 text-right whitespace-nowrap">${formatarValor(r.valorPrevisto)}</td>
+                    <td class="py-2 px-3 text-right font-semibold whitespace-nowrap">${formatarValor(r.valorRecebido)}</td>
+                    <td class="py-2 px-3 text-slate-500 max-w-xs truncate" title="${escapeHtml(r.objeto || '')}">${escapeHtml(r.objeto || '-')}</td>
+                </tr>
+            `).join('');
+
+            container.innerHTML = `
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-slate-500 border-b-2 border-slate-200">
+                            <th class="py-2 px-3 font-semibold">ANO</th>
+                            <th class="py-2 px-3 font-semibold">AUTORIA</th>
+                            <th class="py-2 px-3 font-semibold">PARTIDO</th>
+                            <th class="py-2 px-3 font-semibold">FUNÇÃO</th>
+                            <th class="py-2 px-3 font-semibold">STATUS</th>
+                            <th class="py-2 px-3 font-semibold text-right">VALOR PREVISTO</th>
+                            <th class="py-2 px-3 font-semibold text-right">VALOR RECEBIDO</th>
+                            <th class="py-2 px-3 font-semibold">OBJETO</th>
+                        </tr>
+                    </thead>
+                    <tbody>${linhas}</tbody>
+                    <tfoot>
+                        <tr class="border-t-2 border-slate-800 font-bold text-slate-900">
+                            <td class="py-2.5 px-3" colspan="5">TOTAL (${ordenadas.length})</td>
+                            <td class="py-2.5 px-3 text-right">${formatarValor(totalPrevisto)}</td>
+                            <td class="py-2.5 px-3 text-right">${formatarValor(totalRecebido)}</td>
+                            <td class="py-2.5 px-3"></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            `;
+
+            container.querySelectorAll('tr[data-idx]').forEach(tr => {
+                const idx = parseInt(tr.getAttribute('data-idx'), 10);
+                tr.addEventListener('click', () => abrirPainelEmenda(ordenadas[idx]));
+            });
+        }
+
+        function abrirPainelEmenda(r) {
+            document.getElementById('painelTitulo').textContent = r.autoria || 'Emenda';
+            document.getElementById('painelSubtitulo').textContent = `${ROTULOS_TIPO_EMENDA[r.tipo] || r.origemBruta} • ${r.ano || 'ano não informado'}`;
+            document.getElementById('painelBreadcrumb').innerHTML = '';
+
+            const contentEl = document.getElementById('painelConteudo');
+
+            const campos = [
+                ['Número', r.numero],
+                ['Tipo de Emenda', r.tipoEmendaDetalhe],
+                ['Autoria', r.autoria],
+                ['Partido', r.partido],
+                ['Função de Governo', r.funcao],
+                ['Origem', r.origemBruta],
+                ['Valor Previsto', formatarValor(r.valorPrevisto)],
+                ['Valor Recebido', formatarValor(r.valorRecebido)],
+                ['Contrapartida', formatarValor(r.contrapartida)],
+                ['Status de Execução', r.status],
+                ['Forma de Repasse', r.formaRepasse],
+                ['Ato Normativo', r.atoNormativo],
+                ['Responsável pela Execução', r.responsavel],
+                ['Objeto', r.objeto],
+                ['Localidade Beneficiada/Bairro', r.localidade],
+                ['Despesas', formatarValor(r.despesas)]
+            ].filter(([, valor]) => valor !== '' && valor !== null && valor !== undefined);
+
+            contentEl.innerHTML = campos.map(([rotulo, valor]) => `
+                <div class="py-2.5 border-b border-slate-100">
+                    <div class="text-xs text-slate-400 font-semibold">${escapeHtml(rotulo)}</div>
+                    <div class="text-sm text-slate-800 mt-0.5">${escapeHtml(String(valor))}</div>
+                </div>
+            `).join('');
 
             if (typeof lucide !== 'undefined') lucide.createIcons();
 
