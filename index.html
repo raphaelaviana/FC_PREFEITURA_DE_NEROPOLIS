@@ -1223,8 +1223,6 @@
             const pctAlerta = Math.min(100, (n.limiteAlertaPct / escalaMax) * 100);
             const pctPrudencial = Math.min(100, (n.limitePrudencialPct / escalaMax) * 100);
             const pctMaximo = Math.min(100, (n.limiteMaximoPct / escalaMax) * 100);
-            const margemAteAlerta = n.limiteAlertaValor - n.despesaLiquida;
-            const margemAteMaximo = n.limiteMaximoValor - n.despesaLiquida;
 
             return `
                 <div class="border border-slate-200 rounded-lg p-4">
@@ -1248,13 +1246,6 @@
                         <span>Prudencial ${formatarPercentual(n.limitePrudencialPct)}</span>
                         <span>Máximo ${formatarPercentual(n.limiteMaximoPct)}</span>
                     </div>
-
-                    <div class="mt-3 pt-3 border-t border-slate-100 space-y-1 text-xs text-slate-500">
-                        <div class="flex justify-between gap-2"><span>Despesa líquida c/ pessoal (12m)</span><span class="font-semibold text-slate-700 whitespace-nowrap">${formatarValor(n.despesaLiquida)}</span></div>
-                        <div class="flex justify-between gap-2"><span>RCL ajustada</span><span class="font-semibold text-slate-700 whitespace-nowrap">${formatarValor(n.rclAjustada)}</span></div>
-                        <div class="flex justify-between gap-2"><span>Margem até o Alerta</span><span class="font-semibold whitespace-nowrap">${formatarValor(margemAteAlerta, true)}</span></div>
-                        <div class="flex justify-between gap-2"><span>Margem até o Máximo</span><span class="font-semibold whitespace-nowrap">${formatarValor(margemAteMaximo, true)}</span></div>
-                    </div>
                 </div>
             `;
         }
@@ -1262,10 +1253,6 @@
         function renderLimitePessoal() {
             const container = document.getElementById('painelLimitePessoal');
             if (!container) return;
-            const subtitulo = document.getElementById('subtituloLimitePessoal');
-            if (subtitulo) {
-                subtitulo.textContent = `Referência: ${DADOS_LIMITE_PESSOAL.referencia} • Relatório enviado por você, atualizado em ${DADOS_LIMITE_PESSOAL.atualizadoEm} — não muda com os filtros de Ano/Mês/Fundo do topo da página`;
-            }
             container.innerHTML = DADOS_LIMITE_PESSOAL.niveis.map(n => renderCardLimitePessoal(n)).join('');
             if (typeof lucide !== 'undefined') lucide.createIcons();
         }
