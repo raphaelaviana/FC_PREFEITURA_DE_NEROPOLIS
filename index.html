@@ -415,11 +415,11 @@
                     <p class="text-2xl font-bold text-slate-900 mt-1" id="statEmendasQtd">-</p>
                 </div>
                 <div class="bg-white rounded-lg shadow-lg border border-slate-200 px-4 py-3">
-                    <p class="text-xs text-slate-500 font-semibold">TOTAL PREVISTO</p>
+                    <p class="text-xs text-slate-500 font-semibold" id="labelEmendasPrevisto">TOTAL PREVISTO</p>
                     <p class="text-2xl font-bold text-slate-900 mt-1" id="statEmendasPrevisto">-</p>
                 </div>
                 <div class="bg-white rounded-lg shadow-lg border border-slate-200 px-4 py-3">
-                    <p class="text-xs text-slate-500 font-semibold">TOTAL RECEBIDO</p>
+                    <p class="text-xs text-slate-500 font-semibold" id="labelEmendasRecebido">TOTAL RECEBIDO</p>
                     <p class="text-2xl font-bold text-emerald-700 mt-1" id="statEmendasRecebido">-</p>
                 </div>
             </div>
@@ -650,6 +650,7 @@
             processarFolha();
             processarSaldos();
             processarEmendas();
+            processarEmendasImpositivas();
         });
 
         function guardarELerDadosExcel(rows, anoForcado) {
@@ -1961,8 +1962,10 @@
         /* ---------- Emendas (planilha separada) ---------- */
 
         const SHEET_ID_EMENDAS = '1RvoRanIkJEGws3_UcrifZ0w0Jp4_4L0T';
+        const SHEET_ID_EMENDAS_IMPOSITIVAS = '1dmoS-sKMR-SAec9Ewred9fUk7mAfG1Qk';
         let registrosEmendas = [];
-        let erroEmendas = null;
+        let erroEmendasPrincipal = null;
+        let erroEmendasImpositivas = null;
         let tipoEmendaAtivo = 'FEDERAL';
         const ROTULOS_TIPO_EMENDA = { FEDERAL: 'Federais', ESTADUAL: 'Estaduais', MUNICIPAL: 'Municipais', IMPOSITIVA: 'Impositivas' };
 
@@ -1988,16 +1991,19 @@
                 guardarELerDadosEmendas(rows);
             } catch (e) {
                 console.warn('Não foi possível carregar as emendas:', e);
-                erroEmendas = String((e && e.message) || e);
+                erroEmendasPrincipal = String((e && e.message) || e);
                 renderEmendas();
             }
         }
 
         function guardarELerDadosEmendas(rows) {
-            erroEmendas = null;
+            erroEmendasPrincipal = null;
+
+            // Remove qualquer registro anterior vindo desta mesma fonte (mantém os de outras fontes, ex: Impositivas).
+            registrosEmendas = registrosEmendas.filter(r => r.origemDados !== 'PRINCIPAL');
 
             if (!rows || rows.length < 2) {
-                erroEmendas = 'A planilha de emendas voltou sem linhas de dados.';
+                erroEmendasPrincipal = 'A planilha de emendas voltou sem linhas de dados.';
                 renderEmendas();
                 return;
             }
@@ -2023,13 +2029,10 @@
 
             if (colOrigem < 0 || (colValorPrevisto < 0 && colValorRecebido < 0)) {
                 const colunasEncontradas = rows[0].map(v => String(v || '').trim()).filter(Boolean).join(', ') || '(nenhuma)';
-                erroEmendas = `Não encontrei a coluna ORIGEM e/ou as colunas de valor na planilha de emendas. Colunas encontradas na primeira linha: ${colunasEncontradas}`;
-                registrosEmendas = [];
+                erroEmendasPrincipal = `Não encontrei a coluna ORIGEM e/ou as colunas de valor na planilha de emendas. Colunas encontradas na primeira linha: ${colunasEncontradas}`;
                 renderEmendas();
                 return;
             }
-
-            registrosEmendas = [];
 
             rows.forEach((row, idx) => {
                 if (idx === 0 || !row || row.length === 0) return;
@@ -2038,6 +2041,7 @@
                     if (!origemBruta) return;
 
                     registrosEmendas.push({
+                        origemDados: 'PRINCIPAL',
                         numero: colNumero >= 0 ? String(row[colNumero] || '').trim() : '',
                         ano: colAno >= 0 ? String(row[colAno] || '').trim() : '',
                         tipoEmendaDetalhe: colTipoEmenda >= 0 ? String(row[colTipoEmenda] || '').trim() : '',
@@ -2065,6 +2069,86 @@
             renderEmendas();
         }
 
+        async function processarEmendasImpositivas() {
+            try {
+                const r = await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID_EMENDAS_IMPOSITIVAS}/gviz/tq?tqx=out:json`);
+                if (!r.ok) {
+                    throw new Error(`Falha HTTP ${r.status} ao buscar a planilha de emendas impositivas. Verifique se ela está compartilhada como "Qualquer pessoa com o link pode visualizar" e se é uma Planilha Google nativa (Arquivo → Salvar como Planilhas Google).`);
+                }
+                const t = await r.text();
+                const rows = parseRespostaGviz(t);
+                guardarELerDadosEmendasImpositivas(rows);
+            } catch (e) {
+                console.warn('Não foi possível carregar as emendas impositivas:', e);
+                erroEmendasImpositivas = String((e && e.message) || e);
+                renderEmendas();
+            }
+        }
+
+        function guardarELerDadosEmendasImpositivas(rows) {
+            erroEmendasImpositivas = null;
+
+            // Remove qualquer registro anterior vindo desta mesma fonte (mantém os de outras fontes, ex: Federais/Estaduais/Municipais).
+            registrosEmendas = registrosEmendas.filter(r => r.origemDados !== 'IMPOSITIVAS');
+
+            if (!rows || rows.length < 2) {
+                erroEmendasImpositivas = 'A planilha de emendas impositivas voltou sem linhas de dados.';
+                renderEmendas();
+                return;
+            }
+
+            const headerNorm = rows[0].map(normalizarTexto);
+            const colLoa = localizarColuna(headerNorm, ['LOA'], []);
+            const colEmenda = localizarColuna(headerNorm, ['EMENDA'], []);
+            const colVereador = localizarColuna(headerNorm, ['VEREADOR'], []);
+            const colValor = localizarColuna(headerNorm, ['VALOR'], []);
+            const colObjeto = localizarColuna(headerNorm, ['OBJETO'], []);
+            const colEntidade = localizarColuna(headerNorm, ['ENTIDADE/EXECUTOR'], ['ENTIDADE', 'EXECUTOR']);
+
+            if (colLoa < 0 || colValor < 0) {
+                const colunasEncontradas = rows[0].map(v => String(v || '').trim()).filter(Boolean).join(', ') || '(nenhuma)';
+                erroEmendasImpositivas = `Não encontrei as colunas LOA e/ou VALOR na planilha de emendas impositivas. Colunas encontradas na primeira linha: ${colunasEncontradas}`;
+                renderEmendas();
+                return;
+            }
+
+            rows.forEach((row, idx) => {
+                if (idx === 0 || !row || row.length === 0) return;
+                try {
+                    const ano = colLoa >= 0 ? String(row[colLoa] || '').trim() : '';
+                    if (!ano) return;
+
+                    registrosEmendas.push({
+                        origemDados: 'IMPOSITIVAS',
+                        numero: colEmenda >= 0 ? String(row[colEmenda] || '').trim() : '',
+                        ano,
+                        tipoEmendaDetalhe: '',
+                        autoria: colVereador >= 0 ? String(row[colVereador] || '').trim() : '',
+                        partido: '',
+                        funcao: '',
+                        origemBruta: 'Impositiva',
+                        tipo: 'IMPOSITIVA',
+                        valor: colValor >= 0 ? parseNumero(row[colValor]) : 0,
+                        valorPrevisto: 0,
+                        valorRecebido: 0,
+                        contrapartida: 0,
+                        status: '',
+                        formaRepasse: '',
+                        atoNormativo: '',
+                        entidadeExecutora: colEntidade >= 0 ? String(row[colEntidade] || '').trim() : '',
+                        responsavel: '',
+                        objeto: colObjeto >= 0 ? String(row[colObjeto] || '').trim() : '',
+                        localidade: '',
+                        despesas: 0
+                    });
+                } catch (e) {
+                    console.warn('Linha de emenda impositiva ignorada por erro de leitura:', idx, e);
+                }
+            });
+
+            renderEmendas();
+        }
+
         function mudarTipoEmenda(tipo) {
             tipoEmendaAtivo = tipo;
             document.querySelectorAll('.emenda-tipo-btn').forEach(btn => {
@@ -2081,8 +2165,13 @@
             const statQtd = document.getElementById('statEmendasQtd');
             const statPrevisto = document.getElementById('statEmendasPrevisto');
             const statRecebido = document.getElementById('statEmendasRecebido');
+            const labelPrevisto = document.getElementById('labelEmendasPrevisto');
+            const labelRecebido = document.getElementById('labelEmendasRecebido');
             const rotulo = ROTULOS_TIPO_EMENDA[tipoEmendaAtivo] || tipoEmendaAtivo;
+            const ehImpositiva = tipoEmendaAtivo === 'IMPOSITIVA';
             if (tituloEl) tituloEl.textContent = `EMENDAS ${rotulo.toUpperCase()}`;
+            if (labelPrevisto) labelPrevisto.textContent = ehImpositiva ? 'VALOR MÉDIO POR EMENDA' : 'TOTAL PREVISTO';
+            if (labelRecebido) labelRecebido.textContent = ehImpositiva ? 'VALOR TOTAL' : 'TOTAL RECEBIDO';
 
             // Atualiza a contagem em cada aba-pílula, para dar uma visão rápida sem precisar clicar.
             Object.keys(ROTULOS_TIPO_EMENDA).forEach(tipo => {
@@ -2092,8 +2181,11 @@
                 btn.textContent = `${ROTULOS_TIPO_EMENDA[tipo]} (${qtd})`;
             });
 
-            if (erroEmendas) {
-                container.innerHTML = `<p class="text-red-500 text-sm text-center py-6 px-4">Não foi possível carregar as emendas.<br>${escapeHtml(erroEmendas)}</p>`;
+            // Cada pílula depende de uma fonte de dados diferente (planilha principal vs. planilha de impositivas) —
+            // um erro numa fonte não deve esconder os dados que já carregaram certinho da outra.
+            const erroAtual = ehImpositiva ? erroEmendasImpositivas : erroEmendasPrincipal;
+            if (erroAtual) {
+                container.innerHTML = `<p class="text-red-500 text-sm text-center py-6 px-4">Não foi possível carregar as emendas ${rotulo.toLowerCase()}.<br>${escapeHtml(erroAtual)}</p>`;
                 if (statQtd) statQtd.textContent = '-';
                 if (statPrevisto) statPrevisto.textContent = '-';
                 if (statRecebido) statRecebido.textContent = '-';
@@ -2123,6 +2215,15 @@
                 return;
             }
 
+            if (ehImpositiva) {
+                renderTabelaEmendasImpositivas(container, filtradas, statQtd, statPrevisto, statRecebido);
+            } else {
+                renderTabelaEmendasPadrao(container, filtradas, statQtd, statPrevisto, statRecebido);
+            }
+        }
+
+        // Federais, Estaduais e Municipais: vêm da planilha principal, com Previsto x Recebido, Partido, Status etc.
+        function renderTabelaEmendasPadrao(container, filtradas, statQtd, statPrevisto, statRecebido) {
             const totalPrevisto = filtradas.reduce((s, r) => s + r.valorPrevisto, 0);
             const totalRecebido = filtradas.reduce((s, r) => s + r.valorRecebido, 0);
             if (statQtd) statQtd.textContent = String(filtradas.length);
@@ -2176,6 +2277,57 @@
             });
         }
 
+        // Impositivas: vêm da planilha própria (LOA/EMENDA/VEREADOR/VALOR/OBJETO/ENTIDADE-EXECUTOR),
+        // sem Previsto x Recebido, Partido, Função ou Status — por isso ganham sua própria tabela.
+        function renderTabelaEmendasImpositivas(container, filtradas, statQtd, statPrevisto, statRecebido) {
+            const totalValor = filtradas.reduce((s, r) => s + (r.valor || 0), 0);
+            const mediaValor = filtradas.length ? totalValor / filtradas.length : 0;
+            if (statQtd) statQtd.textContent = String(filtradas.length);
+            if (statPrevisto) statPrevisto.textContent = formatarValor(mediaValor);
+            if (statRecebido) statRecebido.textContent = formatarValor(totalValor);
+
+            const ordenadas = [...filtradas].sort((a, b) => (b.ano || '').localeCompare(a.ano || '') || (b.valor || 0) - (a.valor || 0));
+
+            const linhas = ordenadas.map((r, idx) => `
+                <tr class="painel-grupo-row cursor-pointer border-b border-slate-100" data-idx="${idx}">
+                    <td class="py-2 px-3 text-slate-500 whitespace-nowrap">${escapeHtml(r.ano || '-')}</td>
+                    <td class="py-2 px-3 text-slate-500 whitespace-nowrap">${escapeHtml(r.numero || '-')}</td>
+                    <td class="py-2 px-3 text-slate-700 font-medium">${escapeHtml(r.autoria || '-')}</td>
+                    <td class="py-2 px-3 text-slate-500">${escapeHtml(r.entidadeExecutora || '-')}</td>
+                    <td class="py-2 px-3 text-right font-semibold whitespace-nowrap">${formatarValor(r.valor || 0)}</td>
+                    <td class="py-2 px-3 text-slate-500 max-w-xs truncate" title="${escapeHtml(r.objeto || '')}">${escapeHtml(r.objeto || '-')}</td>
+                </tr>
+            `).join('');
+
+            container.innerHTML = `
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-slate-500 border-b-2 border-slate-200">
+                            <th class="py-2 px-3 font-semibold">ANO (LOA)</th>
+                            <th class="py-2 px-3 font-semibold">Nº EMENDA</th>
+                            <th class="py-2 px-3 font-semibold">VEREADOR</th>
+                            <th class="py-2 px-3 font-semibold">ENTIDADE/EXECUTOR</th>
+                            <th class="py-2 px-3 font-semibold text-right">VALOR</th>
+                            <th class="py-2 px-3 font-semibold">OBJETO</th>
+                        </tr>
+                    </thead>
+                    <tbody>${linhas}</tbody>
+                    <tfoot>
+                        <tr class="border-t-2 border-slate-800 font-bold text-slate-900">
+                            <td class="py-2.5 px-3" colspan="4">TOTAL (${ordenadas.length})</td>
+                            <td class="py-2.5 px-3 text-right">${formatarValor(totalValor)}</td>
+                            <td class="py-2.5 px-3"></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            `;
+
+            container.querySelectorAll('tr[data-idx]').forEach(tr => {
+                const idx = parseInt(tr.getAttribute('data-idx'), 10);
+                tr.addEventListener('click', () => abrirPainelEmenda(ordenadas[idx]));
+            });
+        }
+
         function abrirPainelEmenda(r) {
             document.getElementById('painelTitulo').textContent = r.autoria || 'Emenda';
             document.getElementById('painelSubtitulo').textContent = `${ROTULOS_TIPO_EMENDA[r.tipo] || r.origemBruta} • ${r.ano || 'ano não informado'}`;
@@ -2183,7 +2335,14 @@
 
             const contentEl = document.getElementById('painelConteudo');
 
-            const campos = [
+            const campos = r.origemDados === 'IMPOSITIVAS' ? [
+                ['Nº da Emenda', r.numero],
+                ['LOA (Ano)', r.ano],
+                ['Vereador', r.autoria],
+                ['Entidade/Executor', r.entidadeExecutora],
+                ['Valor', formatarValor(r.valor || 0)],
+                ['Objeto', r.objeto]
+            ].filter(([, valor]) => valor !== '' && valor !== null && valor !== undefined) : [
                 ['Número', r.numero],
                 ['Tipo de Emenda', r.tipoEmendaDetalhe],
                 ['Autoria', r.autoria],
