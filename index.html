@@ -322,6 +322,14 @@
                 </div>
             </div>
 
+            <div class="bg-white rounded-lg shadow-lg overflow-hidden border border-slate-200 mb-4">
+                <div class="bg-[#1b365d] text-white px-4 py-3 border-b-4 border-[#e65100]">
+                    <h3 class="text-sm font-bold">LIMITE DE GASTOS COM PESSOAL (LRF)</h3>
+                    <p class="text-xs text-blue-200 mt-0.5" id="subtituloLimitePessoal">Relatório de Gestão Fiscal — Demonstrativo da Despesa com Pessoal</p>
+                </div>
+                <div id="painelLimitePessoal" class="grid grid-cols-1 lg:grid-cols-3 gap-4 p-4"></div>
+            </div>
+
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
                 <div class="bg-white rounded-lg shadow-lg overflow-hidden border border-slate-200">
                     <div class="bg-[#1b365d] text-white px-4 py-3 border-b-4 border-[#e65100]">
@@ -1145,8 +1153,127 @@
             return lista;
         }
 
+        /* ---------- Limite de Gastos com Pessoal (LRF, art. 20) ----------
+           Fonte: Relatório de Gestão Fiscal (Demonstrativo da Despesa com Pessoal),
+           extraído manualmente do PDF enviado pela Prefeitura — não há planilha/link
+           público pra esse relatório, então os números abaixo são atualizados à mão
+           sempre que um relatório novo for enviado (a lei exige publicação a cada
+           quadrimestre). Ajuste os valores de DADOS_LIMITE_PESSOAL quando isso acontecer. */
+        const DADOS_LIMITE_PESSOAL = {
+            referencia: 'Últimos 12 meses (07/2025 a 06/2026)',
+            atualizadoEm: '11/08/2026',
+            niveis: [
+                {
+                    chave: 'consolidado',
+                    nome: 'Consolidado (Executivo + Legislativo)',
+                    despesaLiquida: 93620603.61,
+                    rclAjustada: 203908342.13,
+                    percentual: 45.91,
+                    limiteAlertaPct: 54, limiteAlertaValor: 110110504.75,
+                    limitePrudencialPct: 57, limitePrudencialValor: 116227755.02,
+                    limiteMaximoPct: 60, limiteMaximoValor: 122345005.28
+                },
+                {
+                    chave: 'executivo',
+                    nome: 'Poder Executivo',
+                    despesaLiquida: 88211446.90,
+                    rclAjustada: 203908342.13,
+                    percentual: 43.26,
+                    limiteAlertaPct: 48.6, limiteAlertaValor: 99099454.27,
+                    limitePrudencialPct: 51.3, limitePrudencialValor: 104604979.51,
+                    limiteMaximoPct: 54, limiteMaximoValor: 110110504.75
+                },
+                {
+                    chave: 'legislativo',
+                    nome: 'Poder Legislativo',
+                    despesaLiquida: 5409156.71,
+                    rclAjustada: 203908342.13,
+                    percentual: 2.65,
+                    limiteAlertaPct: 5.4, limiteAlertaValor: 11011050.48,
+                    limitePrudencialPct: 5.7, limitePrudencialValor: 11622775.50,
+                    limiteMaximoPct: 6, limiteMaximoValor: 12234500.53
+                }
+            ]
+        };
+
+        function formatarPercentual(num) {
+            if (num === null || num === undefined || isNaN(num)) return '-';
+            return num.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
+        }
+
+        function classificarZonaLimitePessoal(n) {
+            if (n.percentual >= n.limiteMaximoPct) {
+                return { fill: '#d03b3b', badge: 'bg-red-50 text-red-700', icone: 'alert-octagon', rotulo: 'Acima do limite máximo' };
+            }
+            if (n.percentual >= n.limitePrudencialPct) {
+                return { fill: '#ec835a', badge: 'bg-orange-50 text-orange-700', icone: 'alert-triangle', rotulo: 'Acima do limite prudencial' };
+            }
+            if (n.percentual >= n.limiteAlertaPct) {
+                return { fill: '#fab219', badge: 'bg-amber-50 text-amber-700', icone: 'alert-circle', rotulo: 'Em alerta' };
+            }
+            return { fill: '#0ca30c', badge: 'bg-emerald-50 text-emerald-700', icone: 'check-circle', rotulo: 'Dentro do limite' };
+        }
+
+        function renderCardLimitePessoal(n) {
+            const zona = classificarZonaLimitePessoal(n);
+            // A escala do medidor vai um pouco além do limite máximo, pra sobrar espaço visual
+            // caso o percentual atual (ou o próprio limite) fique muito perto do teto.
+            const escalaMax = Math.max(n.limiteMaximoPct * 1.08, n.percentual * 1.02);
+            const pctFill = Math.min(100, (n.percentual / escalaMax) * 100);
+            const pctAlerta = Math.min(100, (n.limiteAlertaPct / escalaMax) * 100);
+            const pctPrudencial = Math.min(100, (n.limitePrudencialPct / escalaMax) * 100);
+            const pctMaximo = Math.min(100, (n.limiteMaximoPct / escalaMax) * 100);
+            const margemAteAlerta = n.limiteAlertaValor - n.despesaLiquida;
+            const margemAteMaximo = n.limiteMaximoValor - n.despesaLiquida;
+
+            return `
+                <div class="border border-slate-200 rounded-lg p-4">
+                    <p class="text-xs font-bold text-slate-500 uppercase">${escapeHtml(n.nome)}</p>
+                    <div class="flex items-baseline gap-2 mt-1">
+                        <p class="text-3xl font-semibold text-slate-900">${formatarPercentual(n.percentual)}</p>
+                        <p class="text-xs text-slate-400">da RCL ajustada</p>
+                    </div>
+                    <span class="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full mt-1.5 ${zona.badge}">
+                        <i data-lucide="${zona.icone}" class="w-3 h-3"></i>${zona.rotulo}
+                    </span>
+
+                    <div class="relative h-2.5 rounded-full bg-slate-100 mt-3.5">
+                        <div class="absolute inset-y-0 left-0 rounded-full" style="width:${pctFill}%; background:${zona.fill};"></div>
+                        <div class="absolute -top-0.5 -bottom-0.5 w-px bg-slate-400" style="left:${pctAlerta}%;" title="Alerta: ${formatarPercentual(n.limiteAlertaPct)}"></div>
+                        <div class="absolute -top-0.5 -bottom-0.5 w-px bg-slate-400" style="left:${pctPrudencial}%;" title="Prudencial: ${formatarPercentual(n.limitePrudencialPct)}"></div>
+                        <div class="absolute -top-0.5 -bottom-0.5 w-px bg-slate-700" style="left:${pctMaximo}%;" title="Máximo: ${formatarPercentual(n.limiteMaximoPct)}"></div>
+                    </div>
+                    <div class="flex flex-wrap gap-x-3 text-[10px] text-slate-400 mt-1">
+                        <span>Alerta ${formatarPercentual(n.limiteAlertaPct)}</span>
+                        <span>Prudencial ${formatarPercentual(n.limitePrudencialPct)}</span>
+                        <span>Máximo ${formatarPercentual(n.limiteMaximoPct)}</span>
+                    </div>
+
+                    <div class="mt-3 pt-3 border-t border-slate-100 space-y-1 text-xs text-slate-500">
+                        <div class="flex justify-between gap-2"><span>Despesa líquida c/ pessoal (12m)</span><span class="font-semibold text-slate-700 whitespace-nowrap">${formatarValor(n.despesaLiquida)}</span></div>
+                        <div class="flex justify-between gap-2"><span>RCL ajustada</span><span class="font-semibold text-slate-700 whitespace-nowrap">${formatarValor(n.rclAjustada)}</span></div>
+                        <div class="flex justify-between gap-2"><span>Margem até o Alerta</span><span class="font-semibold whitespace-nowrap">${formatarValor(margemAteAlerta, true)}</span></div>
+                        <div class="flex justify-between gap-2"><span>Margem até o Máximo</span><span class="font-semibold whitespace-nowrap">${formatarValor(margemAteMaximo, true)}</span></div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderLimitePessoal() {
+            const container = document.getElementById('painelLimitePessoal');
+            if (!container) return;
+            const subtitulo = document.getElementById('subtituloLimitePessoal');
+            if (subtitulo) {
+                subtitulo.textContent = `Referência: ${DADOS_LIMITE_PESSOAL.referencia} • Relatório enviado por você, atualizado em ${DADOS_LIMITE_PESSOAL.atualizadoEm} — não muda com os filtros de Ano/Mês/Fundo do topo da página`;
+            }
+            container.innerHTML = DADOS_LIMITE_PESSOAL.niveis.map(n => renderCardLimitePessoal(n)).join('');
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
+
         function atualizarIndicadores() {
             if (!document.getElementById('abaIndicadores')) return;
+
+            renderLimitePessoal();
 
             const fundoSelecionado = document.getElementById('selectFundo').value.toUpperCase();
             const anoSelecionado = document.getElementById('selectAno').value.toUpperCase();
