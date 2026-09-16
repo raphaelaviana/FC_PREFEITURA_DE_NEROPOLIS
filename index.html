@@ -257,6 +257,10 @@
                 <i data-lucide="handshake" class="w-4 h-4"></i>
                 Emendas
             </button>
+            <button id="tabBtnTopicos" onclick="mudarAba('topicos')" type="button" class="tab-btn">
+                <i data-lucide="tags" class="w-4 h-4"></i>
+                Gastos por Tópico
+            </button>
         </div>
     </div>
 
@@ -438,6 +442,20 @@
                     <p class="text-xs text-blue-200 mt-0.5">Segue o filtro de Ano selecionado no topo da página. Clique numa emenda para ver todos os detalhes.</p>
                 </div>
                 <div id="listaEmendas" class="overflow-x-auto"></div>
+            </div>
+
+        </div>
+
+        <!-- ABA: GASTOS POR TÓPICO -->
+        <div id="abaTopicos" class="hidden">
+
+            <div class="bg-white rounded-lg shadow-lg overflow-hidden border border-slate-200 mb-4">
+                <div class="bg-[#1b365d] text-white px-4 py-3 border-b-4 border-[#e65100]">
+                    <h3 class="text-sm font-bold">GASTOS POR TÓPICO</h3>
+                    <p class="text-xs text-blue-200 mt-0.5" id="subtituloTopicos">Visão rápida de alguns temas principais de gasto (não é o total de despesas do período), identificados pelo histórico de cada empenho. Segue os filtros de Ano e Fundo do topo da página. Clique em um card para ver as obras/ações que compõem aquele total.</p>
+                </div>
+                <div id="painelTopicos" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 p-4"></div>
+                <div id="resumoTopicos" class="px-4 pb-4 text-xs text-slate-500"></div>
             </div>
 
         </div>
@@ -659,6 +677,7 @@
             processarSaldos();
             processarEmendas();
             processarEmendasImpositivas();
+            processarHistoricoEmpenhos();
         });
 
         function guardarELerDadosExcel(rows, anoForcado) {
@@ -679,6 +698,8 @@
             const colTcm = localizarColuna(headerNorm, ['TCM'], []);
             const colEnte = localizarColuna(headerNorm, ['ENTE'], []);
             const colSegReceita = localizarColuna(headerNorm, ['SEGREGACAO DE RECEITA'], []);
+            // EMPENHO: usado para cruzar com a planilha de histórico de empenhos (aba Gastos por Tópico).
+            const colEmpenho = localizarColuna(headerNorm, ['EMPENHO'], []);
 
             rows.forEach((row, idx) => {
                 if (idx === 0 || !row || row.length === 0) return;
@@ -705,7 +726,8 @@
                     ente: colEnte >= 0 ? String(row[colEnte] || '').trim() : '',
                     segReceita: colSegReceita >= 0 ? String(row[colSegReceita] || '').trim() : '',
                     dataFormatada: infoData.texto,
-                    dataOrd: infoData.ord
+                    dataOrd: infoData.ord,
+                    empenho: colEmpenho >= 0 ? String(row[colEmpenho] || '').trim() : ''
                 });
             });
 
@@ -773,6 +795,7 @@
             atualizarIndicadores();
             renderSaldosIndicador();
             renderEmendas();
+            renderGastosPorTopico();
         }
 
         function podeAbrirPainel(catDescricao, filhoDescricao) {
@@ -1118,7 +1141,8 @@
                 fluxo: { el: document.getElementById('abaFluxoCaixa'), btn: document.getElementById('tabBtnFluxo') },
                 indicadores: { el: document.getElementById('abaIndicadores'), btn: document.getElementById('tabBtnIndicadores') },
                 saldo: { el: document.getElementById('abaSaldo'), btn: document.getElementById('tabBtnSaldo') },
-                emendas: { el: document.getElementById('abaEmendas'), btn: document.getElementById('tabBtnEmendas') }
+                emendas: { el: document.getElementById('abaEmendas'), btn: document.getElementById('tabBtnEmendas') },
+                topicos: { el: document.getElementById('abaTopicos'), btn: document.getElementById('tabBtnTopicos') }
             };
             if (!paineis[aba]) return;
 
@@ -1137,6 +1161,7 @@
             if (aba === 'indicadores') atualizarIndicadores();
             if (aba === 'saldo') renderSaldosIndicador();
             if (aba === 'emendas') renderEmendas();
+            if (aba === 'topicos') renderGastosPorTopico();
         }
 
         function obterClassificacoesDespesa(excluir) {
@@ -2481,6 +2506,289 @@
                     <div class="text-sm text-slate-800 mt-0.5">${escapeHtml(String(valor))}</div>
                 </div>
             `).join('');
+
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+
+            const overlay = document.getElementById('painelOverlay');
+            const painel = document.getElementById('painelLateral');
+            overlay.classList.remove('hidden');
+            requestAnimationFrame(() => {
+                painel.classList.remove('translate-x-full');
+            });
+        }
+
+        /* ---------- Gastos por Tópico (cruza Histórico de Empenhos x Extrato de Conta) ----------
+           Fonte 1: planilha de histórico de empenhos (número do empenho + texto do histórico).
+           Fonte 2: o próprio extrato de conta já usado no Fluxo de Caixa (registrosBrutosExcel),
+           de onde tiramos o valor efetivamente gasto (débito) por número de empenho.
+           O cruzamento é feito pelo número do empenho: CÓDIGO (histórico) = EMPENHO (extrato).
+           A classificação por tópico é por palavra-chave no histórico — melhor esforço, não é
+           uma coluna oficial da planilha. Avise se algum empenho cair no tópico errado. */
+
+        const SHEET_ID_HISTORICO_EMPENHOS = '1g6OFRbCKUqNToWL09KjM7YbeiuhRCxdZ';
+        let registrosHistoricoEmpenhos = [];
+        let mapaHistoricoPorEmpenho = new Map();
+        let erroHistoricoEmpenhos = null;
+        let ultimoAgregadoTopicos = null;
+
+        const TOPICOS_GASTO = [
+            { chave: 'festividades', nome: 'Festividades', icone: 'party-popper', badge: 'bg-fuchsia-50 text-fuchsia-700' },
+            { chave: 'obras', nome: 'Obras e Infraestrutura', icone: 'hard-hat', badge: 'bg-orange-50 text-orange-700' },
+            { chave: 'iluminacao', nome: 'Iluminação Pública', icone: 'lightbulb', badge: 'bg-amber-50 text-amber-700' },
+            { chave: 'saude', nome: 'Saúde (medicamentos, cirurgias, exames)', icone: 'heart-pulse', badge: 'bg-rose-50 text-rose-700' },
+            { chave: 'educacao', nome: 'Educação', icone: 'graduation-cap', badge: 'bg-blue-50 text-blue-700' },
+            { chave: 'assistencia', nome: 'Assistência Social', icone: 'heart-handshake', badge: 'bg-teal-50 text-teal-700' },
+            { chave: 'frota', nome: 'Frota e Combustível', icone: 'fuel', badge: 'bg-cyan-50 text-cyan-700' }
+        ];
+        const META_NAO_CLASSIFICADO = { chave: 'naoClassificado', nome: 'Não classificado', icone: 'help-circle', badge: 'bg-slate-100 text-slate-500' };
+
+        async function processarHistoricoEmpenhos() {
+            try {
+                const r = await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID_HISTORICO_EMPENHOS}/gviz/tq?tqx=out:json`);
+                if (!r.ok) {
+                    throw new Error(`Falha HTTP ${r.status} ao buscar a planilha de histórico de empenhos.`);
+                }
+                const t = await r.text();
+                const rows = parseRespostaGviz(t);
+                guardarELerDadosHistoricoEmpenhos(rows);
+            } catch (e) {
+                console.warn('Não foi possível carregar o histórico de empenhos:', e);
+                erroHistoricoEmpenhos = String((e && e.message) || e);
+                renderGastosPorTopico();
+            }
+        }
+
+        function guardarELerDadosHistoricoEmpenhos(rows) {
+            erroHistoricoEmpenhos = null;
+            registrosHistoricoEmpenhos = [];
+            mapaHistoricoPorEmpenho = new Map();
+
+            if (!rows || rows.length < 2) {
+                erroHistoricoEmpenhos = 'A planilha de histórico de empenhos voltou sem linhas de dados.';
+                renderGastosPorTopico();
+                return;
+            }
+
+            const headerNorm = rows[0].map(normalizarTexto);
+            const colFundo = localizarColuna(headerNorm, ['FUNDO'], []);
+            const colAno = localizarColuna(headerNorm, ['ANO'], []);
+            const colElemento = localizarColuna(headerNorm, ['ELEMENTO'], []);
+            const colCodigo = localizarColuna(headerNorm, ['CODIGO'], []);
+            const colHistorico = localizarColuna(headerNorm, ['HISTORICO'], []);
+            const colValor = localizarColuna(headerNorm, ['VALOR'], []);
+
+            if (colCodigo < 0 || colHistorico < 0) {
+                const colunasEncontradas = rows[0].map(v => String(v || '').trim()).filter(Boolean).join(', ') || '(nenhuma)';
+                erroHistoricoEmpenhos = `Não encontrei as colunas CÓDIGO e/ou HISTÓRICO na planilha de empenhos. Colunas encontradas na primeira linha: ${colunasEncontradas}`;
+                renderGastosPorTopico();
+                return;
+            }
+
+            rows.forEach((row, idx) => {
+                if (idx === 0 || !row || row.length === 0) return;
+                try {
+                    const codigo = String(row[colCodigo] || '').trim();
+                    if (!codigo) return;
+                    const historico = colHistorico >= 0 ? String(row[colHistorico] || '').trim() : '';
+                    const elemento = colElemento >= 0 ? String(row[colElemento] || '').trim() : '';
+                    const rec = {
+                        codigo,
+                        fundo: colFundo >= 0 ? String(row[colFundo] || '').trim().toUpperCase() : '',
+                        ano: colAno >= 0 ? String(row[colAno] || '').trim() : '',
+                        elemento,
+                        elementoNorm: normalizarTexto(elemento),
+                        historico,
+                        historicoNorm: normalizarTexto(historico),
+                        valorEmpenhado: colValor >= 0 ? parseNumero(row[colValor]) : 0
+                    };
+                    registrosHistoricoEmpenhos.push(rec);
+                    mapaHistoricoPorEmpenho.set(codigo, rec);
+                } catch (e) {
+                    console.warn('Linha de histórico de empenho ignorada por erro de leitura:', idx, e);
+                }
+            });
+
+            renderGastosPorTopico();
+        }
+
+        // Ordem importa: primeira regra que bater define o tópico. Iluminação Pública é checada
+        // antes de Obras porque as duas às vezes usam o mesmo elemento orçamentário (449051).
+        function classificarTopicoEmpenho(hist) {
+            const h = hist.historicoNorm;
+            const e = hist.elementoNorm;
+            const f = hist.fundo;
+
+            if (['FESTA', 'JUNINA', 'ARRAIA', 'PADROEIRO', 'PADROEIRA', 'REVEILLON', 'NATALIN', 'CARNAVAL'].some(k => h.includes(k))) {
+                return 'festividades';
+            }
+            if (h.includes('ILUMINACAO PUBLICA') || (h.includes('ILUMINACAO') && h.includes('PUBLICA'))) {
+                return 'iluminacao';
+            }
+            const ehElementoObras = e.indexOf('449051') === 0;
+            const temPalavraDeObra = ['CONSTRUCAO', 'PAVIMENTACAO', 'REFORMA', 'ASFALT', 'CALCAMENTO', 'DRENAGEM'].some(k => h.includes(k));
+            const ehElementoPessoal = e.indexOf('319') === 0 || e.indexOf('339034') === 0 || e.indexOf('339004') === 0;
+            if ((ehElementoObras || temPalavraDeObra) && !ehElementoPessoal) {
+                return 'obras';
+            }
+            if (['MEDICAMENTO', 'FARMAC', 'CIRURGIA'].some(k => h.includes(k))) {
+                return 'saude';
+            }
+            if (h.includes('EXAME') && f === 'FMS') {
+                return 'saude';
+            }
+            if (['MERENDA', 'ESCOLAR', 'CMEI', 'CRECHE'].some(k => h.includes(k))) {
+                return 'educacao';
+            }
+            if (e.indexOf('339048') === 0 || h.includes('AUXILIO PECUNIARIO') || h.includes('RELATORIO SOCIAL')) {
+                return 'assistencia';
+            }
+            if (h.includes('COMBUSTIVEL') || h.includes('FROTA') || h.includes('MANUTENCAO DE VEICULO') || h.includes('MANUTENCAO VEICULAR')) {
+                return 'frota';
+            }
+            return null;
+        }
+
+        function renderCardTopico(meta, grupo) {
+            const valorTexto = grupo && grupo.total > 0 ? formatarValor(grupo.total) : '<span class="text-slate-400">R$ 0,00</span>';
+            const qtd = grupo ? grupo.qtd : 0;
+            return `
+                <button type="button" onclick="abrirPainelTopico('${meta.chave}')" class="text-left border border-slate-200 rounded-lg p-4 hover:border-slate-300 hover:shadow-md transition-shadow bg-white">
+                    <span class="inline-flex items-center justify-center w-8 h-8 rounded-full mb-2 ${meta.badge}">
+                        <i data-lucide="${meta.icone}" class="w-4 h-4"></i>
+                    </span>
+                    <p class="text-xs font-bold text-slate-600 uppercase leading-tight">${escapeHtml(meta.nome)}</p>
+                    <p class="text-xl font-semibold text-slate-900 mt-1">${valorTexto}</p>
+                    <p class="text-[11px] text-slate-400 mt-0.5">${qtd} empenho${qtd === 1 ? '' : 's'}</p>
+                </button>
+            `;
+        }
+
+        function renderGastosPorTopico() {
+            const container = document.getElementById('painelTopicos');
+            const resumo = document.getElementById('resumoTopicos');
+            if (!container) return;
+
+            if (erroHistoricoEmpenhos) {
+                container.innerHTML = `<p class="text-red-500 text-sm text-center py-6 px-4 col-span-full">Não foi possível carregar o histórico de empenhos.<br>${escapeHtml(erroHistoricoEmpenhos)}</p>`;
+                if (resumo) resumo.textContent = '';
+                return;
+            }
+            if (registrosHistoricoEmpenhos.length === 0 || registrosBrutosExcel.length === 0) {
+                container.innerHTML = '<p class="text-slate-400 text-sm text-center py-6 col-span-full">Carregando dados de empenhos e do extrato de conta...</p>';
+                if (resumo) resumo.textContent = '';
+                return;
+            }
+
+            const anoSelecionado = document.getElementById('selectAno').value.toUpperCase();
+            const fundoSelecionado = document.getElementById('selectFundo').value.toUpperCase();
+
+            const despesasComEmpenho = registrosBrutosExcel.filter(r =>
+                r.saldo < 0 && r.empenho &&
+                (anoSelecionado === 'TODOS' || r.ano === anoSelecionado) &&
+                fundoCorresponde(r.fundo, fundoSelecionado));
+
+            const agregados = {};
+            TOPICOS_GASTO.forEach(t => { agregados[t.chave] = { total: 0, qtd: 0, itens: new Map() }; });
+            agregados.naoClassificado = { total: 0, qtd: 0, itens: new Map() };
+            agregados.semHistorico = { total: 0, qtd: 0, itens: new Map() };
+
+            let totalGeral = 0;
+
+            despesasComEmpenho.forEach(r => {
+                const gasto = Math.abs(r.saldo);
+                totalGeral += gasto;
+                const hist = mapaHistoricoPorEmpenho.get(r.empenho);
+                const chave = hist ? (classificarTopicoEmpenho(hist) || 'naoClassificado') : 'semHistorico';
+                const grupo = agregados[chave];
+                grupo.total += gasto;
+                const existente = grupo.itens.get(r.empenho);
+                if (existente) {
+                    existente.valor += gasto;
+                } else {
+                    grupo.qtd += 1;
+                    grupo.itens.set(r.empenho, {
+                        codigo: r.empenho,
+                        historico: hist ? hist.historico : '(histórico não encontrado para este número de empenho na planilha de empenhos)',
+                        elemento: hist ? hist.elemento : '',
+                        fundo: r.fundo,
+                        valor: gasto
+                    });
+                }
+            });
+
+            ultimoAgregadoTopicos = agregados;
+
+            // Mostra só os tópicos principais — a ideia não é cobrir 100% das despesas,
+            // e sim dar uma noção rápida de para onde vai o dinheiro nesses temas. Por isso
+            // não existe mais um card de "Não classificado" aqui.
+            container.innerHTML = TOPICOS_GASTO.map(t => renderCardTopico(t, agregados[t.chave])).join('');
+
+            if (resumo) {
+                const totalClassificado = TOPICOS_GASTO.reduce((s, t) => s + agregados[t.chave].total, 0);
+                let texto = `Soma dos tópicos acima, com os filtros atuais: ${formatarValor(totalClassificado).replace(/<[^>]+>/g, '')}. Esta aba mostra só esses temas — não representa o total de despesas do período.`;
+                if (agregados.semHistorico.qtd > 0) {
+                    texto += ` Atenção: ${agregados.semHistorico.qtd} empenho(s) do extrato (${formatarValor(agregados.semHistorico.total).replace(/<[^>]+>/g, '')}) não foram encontrados na planilha de histórico — confira se o número do empenho bate nas duas planilhas.`;
+                }
+                resumo.textContent = texto;
+            }
+
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
+
+        // Agrupa os empenhos de um tópico pelo texto do histórico (a descrição da obra/ação),
+        // somando o valor de empenhos diferentes que se referem à mesma obra/ação — assim, em vez
+        // de uma linha por empenho, o painel mostra uma linha por obra/projeto, com o total gasto nela.
+        function agruparItensPorHistorico(itens) {
+            const porDescricao = new Map();
+            itens.forEach(it => {
+                const chave = (it.historico || '').trim().toUpperCase() || `__SEM_DESCRICAO__${it.codigo}`;
+                const existente = porDescricao.get(chave);
+                if (existente) {
+                    existente.valor += it.valor;
+                    existente.codigos.push(it.codigo);
+                } else {
+                    porDescricao.set(chave, {
+                        historico: it.historico,
+                        elemento: it.elemento,
+                        fundo: it.fundo,
+                        valor: it.valor,
+                        codigos: [it.codigo]
+                    });
+                }
+            });
+            return [...porDescricao.values()];
+        }
+
+        function abrirPainelTopico(chave) {
+            const meta = TOPICOS_GASTO.find(t => t.chave === chave) || META_NAO_CLASSIFICADO;
+            const grupo = ultimoAgregadoTopicos ? (ultimoAgregadoTopicos[chave] || ultimoAgregadoTopicos.semHistorico) : null;
+
+            document.getElementById('painelTitulo').textContent = meta.nome;
+            const anoSelecionado = document.getElementById('selectAno').value.toUpperCase();
+            const fundoSelecionado = document.getElementById('selectFundo').value.toUpperCase();
+            document.getElementById('painelSubtitulo').textContent = `${fundoSelecionado} • ${anoSelecionado === 'TODOS' ? 'todos os anos' : anoSelecionado}`;
+            document.getElementById('painelBreadcrumb').innerHTML = '';
+
+            const contentEl = document.getElementById('painelConteudo');
+
+            if (!grupo || grupo.itens.size === 0) {
+                contentEl.innerHTML = '<p class="text-slate-400 text-sm text-center py-6">Nenhum empenho encontrado neste tópico, com os filtros atuais.</p>';
+            } else {
+                // Agrupado por obra/ação (mesmo texto de histórico), não por empenho — assim dá pra
+                // ver, por exemplo, "Construção da Praça X" e "Construção da UBS Alda Tavares" como
+                // linhas separadas, cada uma com o total gasto ali (somando os empenhos daquela obra).
+                const itens = agruparItensPorHistorico([...grupo.itens.values()]).sort((a, b) => b.valor - a.valor);
+                contentEl.innerHTML = itens.map(it => `
+                    <div class="py-2.5 border-b border-slate-100">
+                        <div class="flex items-start justify-between gap-2">
+                            <span class="text-xs text-slate-400 font-semibold">${it.codigos.length > 1 ? 'Empenhos ' + it.codigos.map(c => escapeHtml(c)).join(', ') : 'Empenho ' + escapeHtml(it.codigos[0])}${it.fundo ? ' — ' + escapeHtml(it.fundo) : ''}</span>
+                            <span class="text-sm font-semibold text-slate-800 whitespace-nowrap">${formatarValor(it.valor)}</span>
+                        </div>
+                        <div class="text-sm text-slate-700 mt-1 font-medium">${escapeHtml(it.historico)}</div>
+                        ${it.elemento ? `<div class="text-[11px] text-slate-400 mt-0.5">${escapeHtml(it.elemento)}</div>` : ''}
+                    </div>
+                `).join('');
+            }
 
             if (typeof lucide !== 'undefined') lucide.createIcons();
 
