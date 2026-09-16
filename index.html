@@ -238,12 +238,6 @@
         </div>
     </header>
 
-    <!-- Linha de status: mostra erros de carregamento das planilhas (ex.: coluna não encontrada,
-         falha ao buscar) — antes esses avisos eram só escritos no console, invisíveis na tela. -->
-    <div class="max-w-[1600px] w-full mx-auto px-4 md:px-6">
-        <p id="infoStatus" class="text-xs text-slate-400 pt-2 empty:hidden"></p>
-    </div>
-
     <!-- Barra de Abas -->
     <div class="max-w-[1600px] w-full mx-auto px-4 md:px-6 pt-4 bg-white">
         <div class="flex gap-1 border-b border-slate-200">
@@ -623,18 +617,22 @@
 
             const temCabecalhoDeclarado = cabecalhoDeclarado.some(v => String(v || '').trim() !== '');
 
-            const rows = [];
+            // Importante: nunca usar "rows.push(...linhasDados)" aqui. Com o spread, cada
+            // elemento vira um argumento separado da chamada de push, e o motor JS tem um
+            // limite de argumentos por chamada (na casa de dezenas de milhares) — a planilha
+            // de 2026 já passa de 150 mil linhas, então isso estourava a pilha ("Maximum call
+            // stack size exceeded") e o carregamento falhava por completo. "concat" não tem
+            // esse limite, pois não passa os elementos como argumentos individuais.
+            let rows;
             if (temCabecalhoDeclarado) {
-                rows.push(cabecalhoDeclarado);
-                rows.push(...linhasDados);
+                rows = [cabecalhoDeclarado].concat(linhasDados);
             } else if (linhasDados.length > 0) {
                 // O Google Sheets às vezes não detecta a linha de cabeçalho (comum quando
                 // a maioria das colunas é texto) — nesse caso o cabeçalho vem como a
                 // primeira linha de dados em vez de vir em j.table.cols[].label.
-                rows.push(linhasDados[0]);
-                rows.push(...linhasDados.slice(1));
+                rows = [linhasDados[0]].concat(linhasDados.slice(1));
             } else {
-                rows.push(cabecalhoDeclarado);
+                rows = [cabecalhoDeclarado];
             }
             return rows;
         }
@@ -850,8 +848,6 @@
             });
 
             renderizarTabela(dadosFiltrados, fundoSelecionado);
-            const statusEl = document.getElementById('infoStatus');
-            if (statusEl) statusEl.textContent = `Filtrado por: FUNDO = '${fundoSelecionado}', ANO = '${anoSelecionado}'`;
 
             atualizarIndicadores();
             renderSaldosIndicador();
