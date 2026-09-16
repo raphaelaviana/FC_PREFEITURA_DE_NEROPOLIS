@@ -735,20 +735,40 @@
             recalcularEFiltrar();
         }
 
+        // Escolhe, dentro de uma lista de registros, o "ano" a considerar quando o filtro
+        // global de Ano está em "TODOS OS ANOS" — usa o ano mais recente presente nos dados.
+        function anoMaisRecenteDosRegistros(registros, anoSelecionado) {
+            if (anoSelecionado !== 'TODOS') return anoSelecionado;
+            const anos = registros.map(r => r.ano).filter(Boolean);
+            return anos.length > 0 ? anos.sort().slice(-1)[0] : '';
+        }
+
+        // Acha o mês mais avançado com dados, mas só DENTRO do ano selecionado no topo da
+        // página (ou do ano mais recente, se "TODOS OS ANOS") — nunca olhando para outros anos.
+        // Antes, o cálculo misturava todos os anos carregados: como 2025 tem dado até Dezembro e
+        // 2026 (ano corrente) só até um mês mais cedo, o mês default ficava em Dezembro mesmo com
+        // Ano=2026 selecionado, e as tabelas que comparam o mês exato (ex.: Outras Fontes do Saldo
+        // em Conta) apareciam vazias mesmo havendo dados de 2026 — parecia que "sumiu" o ano atual.
+        function mesMaisRecenteNoAnoSelecionado(registros) {
+            const anoSelecionado = document.getElementById('selectAno') ? document.getElementById('selectAno').value.toUpperCase() : 'TODOS';
+            const anoParaCalculo = anoMaisRecenteDosRegistros(registros, anoSelecionado);
+            const registrosDoAno = anoParaCalculo ? registros.filter(r => r.ano === anoParaCalculo) : registros;
+            const base = registrosDoAno.length > 0 ? registrosDoAno : registros;
+            return base.reduce((max, r) => Math.max(max, r.mesIdx), 0);
+        }
+
         function definirMesIndicadoresPadrao() {
             const selMes = document.getElementById('selectMesIndicadores');
             if (!selMes || selMes.dataset.ajustadoPeloUsuario === '1') return;
             if (registrosBrutosExcel.length === 0) return;
-            const mesMax = registrosBrutosExcel.reduce((max, r) => Math.max(max, r.mesIdx), 0);
-            selMes.value = String(mesMax);
+            selMes.value = String(mesMaisRecenteNoAnoSelecionado(registrosBrutosExcel));
         }
 
         function definirMesSaldoPadrao() {
             const selMes = document.getElementById('selectMesSaldo');
             if (!selMes || selMes.dataset.ajustadoPeloUsuario === '1') return;
             if (registrosSaldos.length === 0) return;
-            const mesMax = registrosSaldos.reduce((max, r) => Math.max(max, r.mesIdx), 0);
-            selMes.value = String(mesMax);
+            selMes.value = String(mesMaisRecenteNoAnoSelecionado(registrosSaldos));
         }
 
         function recalcularEFiltrar() {
@@ -1791,9 +1811,7 @@
         // saldo é uma posição (estoque), então não faz sentido somar anos diferentes; usamos
         // o ano mais recente disponível nos dados de saldo carregados.
         function resolverAnoSaldos(anoSelecionado) {
-            if (anoSelecionado !== 'TODOS') return anoSelecionado;
-            const anosDisponiveis = registrosSaldos.map(r => r.ano).filter(Boolean);
-            return anosDisponiveis.length > 0 ? anosDisponiveis.sort().slice(-1)[0] : '';
+            return anoMaisRecenteDosRegistros(registrosSaldos, anoSelecionado);
         }
 
         function renderSaldosIndicador() {
