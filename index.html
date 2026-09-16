@@ -2627,7 +2627,10 @@
             const ehElementoObras = e.indexOf('449051') === 0;
             const temPalavraDeObra = ['CONSTRUCAO', 'PAVIMENTACAO', 'REFORMA', 'ASFALT', 'CALCAMENTO', 'DRENAGEM'].some(k => h.includes(k));
             const ehElementoPessoal = e.indexOf('319') === 0 || e.indexOf('339034') === 0 || e.indexOf('339004') === 0;
-            if ((ehElementoObras || temPalavraDeObra) && !ehElementoPessoal) {
+            // 339047 é taxa/ART de conselho profissional (ex.: CREA) — mesmo mencionando
+            // "pavimentação", é uma taxa administrativa pequena, não o custo da obra em si.
+            const ehElementoTaxaRegulatoria = e.indexOf('339047') === 0;
+            if ((ehElementoObras || temPalavraDeObra) && !ehElementoPessoal && !ehElementoTaxaRegulatoria) {
                 return 'obras';
             }
             if (['MEDICAMENTO', 'FARMAC', 'CIRURGIA'].some(k => h.includes(k))) {
@@ -2709,8 +2712,6 @@
                     grupo.itens.set(r.empenho, {
                         codigo: r.empenho,
                         historico: hist ? hist.historico : '(histórico não encontrado para este número de empenho na planilha de empenhos)',
-                        elemento: hist ? hist.elemento : '',
-                        fundo: r.fundo,
                         valor: gasto
                     });
                 }
@@ -2735,28 +2736,246 @@
             if (typeof lucide !== 'undefined') lucide.createIcons();
         }
 
-        // Agrupa os empenhos de um tópico pelo texto do histórico (a descrição da obra/ação),
-        // somando o valor de empenhos diferentes que se referem à mesma obra/ação — assim, em vez
-        // de uma linha por empenho, o painel mostra uma linha por obra/projeto, com o total gasto nela.
-        function agruparItensPorHistorico(itens) {
-            const porDescricao = new Map();
+        /* ---------- Extração de um rótulo curto a partir do histórico ----------
+           A planilha não tem uma coluna de "nome da obra/evento/secretaria" — só o texto livre
+           do histórico. As funções abaixo tentam tirar dali um rótulo curto e legível (nunca um
+           nome inventado: é sempre um recorte do próprio texto), para o painel mostrar uma linha
+           por obra/evento/secretaria com o total gasto ali, em vez do texto burocrático inteiro
+           e sem separar por número de empenho. Isso é heurístico — a redação varia empenho a
+           empenho, então nem sempre agrupa perfeitamente; avise se algo ficar estranho. */
+
+        // Nomes de eventos recorrentes já vistos nos dados reais — checados antes do recorte
+        // genérico, pra sempre aparecer com esse nome curto e correto.
+        const APELIDOS_HISTORICO = [
+            { padrao: 'ARRAIA DONA GERUSA', nome: 'Arraiá Dona Gerusa' },
+            { padrao: 'SAO BENEDITO', nome: 'Festa de São Benedito' },
+            { padrao: 'LOUVOR AO PADROEIRO', nome: 'Festa do Padroeiro' },
+            { padrao: 'LOUVOR A PADROEIRA', nome: 'Festa da Padroeira' },
+            { padrao: 'FESTA PADROEIRO', nome: 'Festa do Padroeiro' },
+            { padrao: 'FESTA DA PADROEIRA', nome: 'Festa da Padroeira' },
+            { padrao: 'IMACULADO CORACAO DE MARIA', nome: 'Festa do Imaculado Coração de Maria' },
+            { padrao: 'CONFRATERNIZACAO', nome: 'Festa de Confraternização' },
+            { padrao: 'CRIANCAS', nome: 'Festa das Crianças' },
+            { padrao: 'DIA DO NORDESTINO', nome: 'Festa do Dia do Nordestino' },
+            { padrao: 'CARNAVAL', nome: 'Carnaval' },
+            { padrao: 'REVEILLON', nome: 'Réveillon' },
+            { padrao: 'ANIVERSARIO DA CIDADE', nome: 'Aniversário da Cidade' },
+            { padrao: 'ANIVERSARIO DO MUNICIPIO', nome: 'Aniversário da Cidade' },
+            { padrao: 'NATALIN', nome: 'Natal' },
+            { padrao: 'FESTA JUNINA', nome: 'Festa Junina' } // mais genérico — por último
+        ];
+
+        // Secretarias/órgãos já vistos no texto de combustível ("...VEÍCULOS DA/DO X") —
+        // usado para juntar grafias diferentes do mesmo órgão num nome só.
+        const CANONICOS_SECRETARIA = [
+            { padrao: 'SEC. DE OBRAS', nome: 'Secretaria de Obras' },
+            { padrao: 'SEC DE OBRAS', nome: 'Secretaria de Obras' },
+            { padrao: 'JARDINAGEM', nome: 'Jardinagem' },
+            { padrao: 'DESENVOLVIMENTO ECONOMICO', nome: 'Secretaria de Desenvolvimento Econômico' },
+            { padrao: 'CIDE', nome: 'CIDE' },
+            { padrao: 'INFRAESTRUTURA', nome: 'Secretaria de Infraestrutura e Serviços Urbanos' },
+            { padrao: 'INFRA.', nome: 'Secretaria de Infraestrutura e Serviços Urbanos' },
+            { padrao: 'TRANSPORTE', nome: 'Secretaria de Transporte' },
+            { padrao: 'FINANCAS', nome: 'Secretaria de Administração e Finanças' },
+            { padrao: 'ADMINISTRACAO', nome: 'Secretaria de Administração e Finanças' },
+            { padrao: 'CONSELHO TUTELAR', nome: 'Conselho Tutelar' },
+            { padrao: 'GABINETE DO PREF', nome: 'Gabinete do Prefeito' },
+            { padrao: 'FMAS', nome: 'FMAS' },
+            { padrao: 'CREAS', nome: 'CREAS' },
+            { padrao: 'CRAS', nome: 'CRAS' },
+            { padrao: 'FME', nome: 'FME' },
+            { padrao: 'FMS', nome: 'FMS' }
+        ];
+
+        // Prefixos burocráticos removidos do começo do histórico (repetidas vezes, na ordem).
+        const PREFIXOS_HISTORICO = [
+            'DESPESA COM CONTRATACAO DE EMPRESA ESPECIALIZADA EM SERVICOS DE ',
+            'DESPESA COM CONTRATACAO DE EMPRESA ESPECIALIZADA PARA REALIZAR ',
+            'DESPESA COM CONTRATACAO DE EMPRESA ESPECIALIZADA PARA ',
+            'DESPESA COM CONTRATACAO DE EMPRESA PARA A EXECUCAO DA ',
+            'DESPESA COM CONTRATACAO DE EMPRESA PARA A EXECUCAO DE ',
+            'DESPESA COM CONTRATACAO DE EMPRESA PARA EXECUCAO DA ',
+            'DESPESA COM CONTRATACAO DE EMPRESA PARA EXECUCAO DE ',
+            'DESPESA COM CONTRATACAO DE EMPRESA PARA ',
+            'CONTRATACAO DE EMPRESA ESPECIALIZADA EM SERVICOS DE ',
+            'CONTRATACAO DE EMPRESA ESPECIALIZADA PARA REALIZAR ',
+            'CONTRATACAO DE EMPRESA ESPECIALIZADA PARA ',
+            'CONTRATACAO DE EMPRESA PARA A EXECUCAO DA ',
+            'CONTRATACAO DE EMPRESA PARA A EXECUCAO DE ',
+            'CONTRATACAO DE EMPRESA PARA EXECUCAO DA ',
+            'CONTRATACAO DE EMPRESA PARA EXECUCAO DE ',
+            'CONTRATACAO DE EMPRESA PARA ',
+            'DESPESA COM PRESTACAO DE SERVICOS DE ',
+            'DESPESA COM PRESTACAO DE SERVICOS PARA ',
+            'PRESTACAO DE SERVICOS DE ',
+            'PRESTACAO DE SERVICOS PARA ',
+            'DESPESA COM AQUISICAO DE ',
+            'AQUISICAO DE ',
+            'DESPESA COM LOCACAO DE ',
+            'LOCACAO DE ',
+            'DESPESA COM FORNECIMENTO DE ',
+            'FORNECIMENTO DE ',
+            'DESPESA COM REALIZACAO DE ',
+            'REALIZACAO DE ',
+            'REALIZACAO DO ',
+            'REALIZACAO DA ',
+            'DESPESA COM ',
+            'DESPESA DE ',
+            'DESPESA REFERENTE A ',
+            'DESPESA A ',
+            'DESP. COM ',
+            'DESP COM ',
+            'PAGAMENTO REFERENTE A ',
+            'PAGAMENTO REF. ',
+            'PAGAMENTO DE '
+        ];
+
+        // Marcadores que indicam que, dali pra frente, é a parte burocrática (data, contrato,
+        // pregão etc.) — corta o rótulo ali.
+        const MARCADORES_CORTE = [
+            ', DE ACORDO COM', ', CONFORME', ', CONF.', ', CONF ', ', COM VIGENCIA', ', VIGENCIA',
+            ', VIG.', ', VIG ', 'COM VIG.', 'COM VIG ', ', EM SUA', ', TOTAL', ', DOC. EM ANEXO',
+            ', DOCUMENTO EM ANEXO', ', EM ANEXO', ', NOS DIAS', ', NO DIA', ' Nº', ', PREGAO',
+            ', DISPENSA', ', CONTRATO'
+        ];
+
+        // Frases que, no meio do texto, introduzem "para que serve" — o que vem depois costuma
+        // ser a melhor descrição curta (ex.: "...DESTINADO A FESTA JUNINA X").
+        const MARCADORES_LIGACAO = [
+            'DESTINADOS A ', 'DESTINADAS A ', 'DESTINADO A ', 'DESTINADA A ',
+            'PARA A REALIZACAO DA ', 'PARA A REALIZACAO DO ', 'PARA REALIZACAO DA ', 'PARA REALIZACAO DO ',
+            'PARA O EVENTO ', 'EM COMEMORACAO AO ', 'EM COMEMORACAO A '
+        ];
+
+        const PALAVRAS_MINUSCULAS = new Set(['DE', 'DA', 'DO', 'DAS', 'DOS', 'E', 'EM', 'A', 'O', 'OS', 'AS', 'PARA', 'COM', 'NO', 'NA', 'NOS', 'NAS', 'AO', 'AOS']);
+        const SIGLAS_CONHECIDAS = new Set(['UBS', 'CRAS', 'CREAS', 'CMEI', 'CAPS', 'CEI', 'EMEI', 'PSF', 'ESF', 'CEMEI', 'UPA', 'CIDE', 'FMAS', 'FMS', 'FME']);
+
+        function paraCasoDeTitulo(texto) {
+            return texto.split(' ').map((palavraOriginal, idx) => {
+                if (!palavraOriginal) return palavraOriginal;
+                const letras = palavraOriginal.replace(/[^A-Za-zÀ-ÿ]/g, '').toUpperCase();
+                if (SIGLAS_CONHECIDAS.has(letras)) return palavraOriginal;
+                const palavra = palavraOriginal.toLowerCase();
+                if (idx > 0 && PALAVRAS_MINUSCULAS.has(letras)) return palavra;
+                return palavra.charAt(0).toUpperCase() + palavra.slice(1);
+            }).join(' ');
+        }
+
+        // Converte um texto simples (sem acento) num regex que aceita a versão acentuada em
+        // português — assim dá pra escrever os prefixos/marcadores acima sem acento, e ainda
+        // casar com o texto real da planilha (que normalmente tem acento).
+        function paraRegexTolerante(texto) {
+            const mapa = { A: 'AÁÀÂÃ', E: 'EÉÈÊ', I: 'IÍÌÎ', O: 'OÓÒÔÕ', U: 'UÚÙÛ', C: 'CÇ' };
+            const escapado = texto.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            return escapado.replace(/[AEIOUC]/g, letra => `[${mapa[letra]}]`);
+        }
+
+        function encontrarPrefixo(texto, prefixos) {
+            for (const p of prefixos) {
+                const re = new RegExp('^\\s*' + paraRegexTolerante(p), 'i');
+                const m = texto.match(re);
+                if (m) return m[0].length;
+            }
+            return 0;
+        }
+
+        function encontrarMarcador(texto, marcadores, posMinima) {
+            let melhor = -1;
+            for (const marcador of marcadores) {
+                const re = new RegExp(paraRegexTolerante(marcador), 'i');
+                const m = texto.match(re);
+                if (m && m.index >= posMinima && (melhor === -1 || m.index < melhor)) {
+                    melhor = m.index;
+                }
+            }
+            return melhor;
+        }
+
+        function limitarTamanho(texto, max) {
+            if (texto.length <= max) return texto;
+            return texto.slice(0, max).replace(/\s+\S*$/, '') + '…';
+        }
+
+        // Rótulo genérico (obra, evento etc.): usado por todos os tópicos, exceto Frota.
+        function extrairRotuloGasto(historicoOriginal) {
+            // normaliza pequenas variações de pontuação (ex.: "EMPRESA ESPECIALIZADA, PARA...")
+            // pra não atrapalhar o corte dos prefixos abaixo.
+            const historico = String(historicoOriginal || '').trim().replace(/,\s+(PARA|PARA A|PARA O)\s+/gi, ' $1 ');
+            if (!historico) return 'Sem descrição';
+
+            const normalizado = normalizarTexto(historico);
+            for (const apelido of APELIDOS_HISTORICO) {
+                if (normalizado.includes(apelido.padrao)) return apelido.nome;
+            }
+
+            let nucleo;
+            let melhorPos = -1, melhorLen = 0;
+            for (const marcador of MARCADORES_LIGACAO) {
+                const re = new RegExp(paraRegexTolerante(marcador), 'i');
+                const m = historico.match(re);
+                if (m && m.index > 10 && (melhorPos === -1 || m.index < melhorPos)) {
+                    melhorPos = m.index;
+                    melhorLen = m[0].length;
+                }
+            }
+
+            if (melhorPos >= 0) {
+                nucleo = historico.slice(melhorPos + melhorLen);
+            } else {
+                let restante = historico;
+                for (let tentativas = 0; tentativas < 6; tentativas++) {
+                    const tamanho = encontrarPrefixo(restante, PREFIXOS_HISTORICO);
+                    if (tamanho === 0) break;
+                    restante = restante.slice(tamanho);
+                }
+                nucleo = restante;
+            }
+
+            const posCorte = encontrarMarcador(nucleo, MARCADORES_CORTE, 3);
+            if (posCorte >= 0) nucleo = nucleo.slice(0, posCorte);
+            nucleo = nucleo.trim().replace(/^["',.;:\-]+/, '').replace(/["',.;:\-]+$/, '').trim();
+
+            if (nucleo.length < 4) nucleo = historico; // salvaguarda: cortou demais
+
+            return paraCasoDeTitulo(limitarTamanho(nucleo, 70));
+        }
+
+        // Rótulo específico para Frota/Combustível: tenta achar a secretaria/órgão dono dos
+        // veículos (o texto quase sempre segue o padrão "...COMBUSTÍVEL DOS VEÍCULOS DA/DO X...").
+        // Se não achar esse padrão, cai no rótulo genérico acima.
+        function extrairSecretariaFrota(historicoOriginal) {
+            const historico = String(historicoOriginal || '');
+            const m = historico.match(/VE[ÍI]CULOS\s+D[AOE]S?\s+([\s\S]+)/i);
+            if (!m) return extrairRotuloGasto(historicoOriginal);
+
+            let resto = m[1];
+            const posCorte = encontrarMarcador(resto, MARCADORES_CORTE, 0);
+            if (posCorte >= 0) resto = resto.slice(0, posCorte);
+            resto = resto.trim().replace(/^["',.;:\-]+/, '').replace(/["',.;:\-]+$/, '').trim();
+            if (!resto) return extrairRotuloGasto(historicoOriginal);
+
+            const normalizado = normalizarTexto(resto);
+            for (const c of CANONICOS_SECRETARIA) {
+                if (normalizado.includes(c.padrao)) return c.nome;
+            }
+            return paraCasoDeTitulo(limitarTamanho(resto, 60));
+        }
+
+        // Agrupa os empenhos de um tópico pelo rótulo extraído (obra/evento/secretaria conforme o
+        // tópico), somando o valor de empenhos diferentes que caem no mesmo rótulo — assim, em vez
+        // de uma linha por empenho, o painel mostra uma linha por obra/evento/secretaria.
+        function agruparItensPorRotulo(itens, funcaoRotulo) {
+            const porRotulo = new Map();
             itens.forEach(it => {
-                const chave = (it.historico || '').trim().toUpperCase() || `__SEM_DESCRICAO__${it.codigo}`;
-                const existente = porDescricao.get(chave);
+                const nome = funcaoRotulo(it.historico) || 'Outros';
+                const existente = porRotulo.get(nome);
                 if (existente) {
                     existente.valor += it.valor;
-                    existente.codigos.push(it.codigo);
                 } else {
-                    porDescricao.set(chave, {
-                        historico: it.historico,
-                        elemento: it.elemento,
-                        fundo: it.fundo,
-                        valor: it.valor,
-                        codigos: [it.codigo]
-                    });
+                    porRotulo.set(nome, { nome, valor: it.valor });
                 }
             });
-            return [...porDescricao.values()];
+            return [...porRotulo.values()];
         }
 
         function abrirPainelTopico(chave) {
@@ -2774,18 +2993,15 @@
             if (!grupo || grupo.itens.size === 0) {
                 contentEl.innerHTML = '<p class="text-slate-400 text-sm text-center py-6">Nenhum empenho encontrado neste tópico, com os filtros atuais.</p>';
             } else {
-                // Agrupado por obra/ação (mesmo texto de histórico), não por empenho — assim dá pra
-                // ver, por exemplo, "Construção da Praça X" e "Construção da UBS Alda Tavares" como
-                // linhas separadas, cada uma com o total gasto ali (somando os empenhos daquela obra).
-                const itens = agruparItensPorHistorico([...grupo.itens.values()]).sort((a, b) => b.valor - a.valor);
+                // Frota/Combustível é agrupado por secretaria dona dos veículos; os demais tópicos,
+                // por obra/evento — em ambos os casos, uma linha resumida por grupo, sem número de
+                // empenho e sem o histórico inteiro.
+                const funcaoRotulo = chave === 'frota' ? extrairSecretariaFrota : extrairRotuloGasto;
+                const itens = agruparItensPorRotulo([...grupo.itens.values()], funcaoRotulo).sort((a, b) => b.valor - a.valor);
                 contentEl.innerHTML = itens.map(it => `
-                    <div class="py-2.5 border-b border-slate-100">
-                        <div class="flex items-start justify-between gap-2">
-                            <span class="text-xs text-slate-400 font-semibold">${it.codigos.length > 1 ? 'Empenhos ' + it.codigos.map(c => escapeHtml(c)).join(', ') : 'Empenho ' + escapeHtml(it.codigos[0])}${it.fundo ? ' — ' + escapeHtml(it.fundo) : ''}</span>
-                            <span class="text-sm font-semibold text-slate-800 whitespace-nowrap">${formatarValor(it.valor)}</span>
-                        </div>
-                        <div class="text-sm text-slate-700 mt-1 font-medium">${escapeHtml(it.historico)}</div>
-                        ${it.elemento ? `<div class="text-[11px] text-slate-400 mt-0.5">${escapeHtml(it.elemento)}</div>` : ''}
+                    <div class="flex items-center justify-between gap-3 py-2.5 border-b border-slate-100">
+                        <span class="text-sm text-slate-700">${escapeHtml(it.nome)}</span>
+                        <span class="text-sm font-semibold text-slate-800 whitespace-nowrap">${formatarValor(it.valor)}</span>
                     </div>
                 `).join('');
             }
