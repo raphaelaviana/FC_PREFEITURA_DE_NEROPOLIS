@@ -238,6 +238,12 @@
         </div>
     </header>
 
+    <!-- Linha de status: mostra erros de carregamento das planilhas (ex.: coluna não encontrada,
+         falha ao buscar) — antes esses avisos eram só escritos no console, invisíveis na tela. -->
+    <div class="max-w-[1600px] w-full mx-auto px-4 md:px-6">
+        <p id="infoStatus" class="text-xs text-slate-400 pt-2 empty:hidden"></p>
+    </div>
+
     <!-- Barra de Abas -->
     <div class="max-w-[1600px] w-full mx-auto px-4 md:px-6 pt-4 bg-white">
         <div class="flex gap-1 border-b border-slate-200">
@@ -649,25 +655,47 @@
         }
 
         const PLANILHAS_FINANCEIRAS = [
-            { sheetId: '15Ng1oHMjpN7Yu_Re-teK_HaTq1nS7oLs', gid: '1863214707', anoForcado: '2026', rotulo: '2026' },
+            // A planilha de 2026 já acumulou mais de 150 mil lançamentos (principalmente Receita
+            // Própria, lançamento por lançamento) e o retorno completo (26 colunas) passa de 50MB —
+            // grande demais pra buscar inteiro no navegador de forma confiável. "colunas" pede ao
+            // Google Sheets só as colunas que o painel realmente usa (por letra, já que a API do
+            // Sheets exige isso), cortando o tamanho da resposta bastante. Se essa planilha crescer
+            // muito mais, pode ser necessário migrar para uma fonte já resumida por mês/classificação.
+            { sheetId: '15Ng1oHMjpN7Yu_Re-teK_HaTq1nS7oLs', gid: '1863214707', anoForcado: '2026', rotulo: '2026', colunas: 'A,D,F,K,O,U,W,X,Y,Z' },
             { sheetId: '1JCRJCIXDoNeUpfS0f3I5WCkrvHWD-CSV', gid: '0', anoForcado: '2025', rotulo: '2025' }
         ];
 
+        // As duas planilhas financeiras (2025 e 2026) carregam em paralelo e dividem essa mesma
+        // linha de status — se cada uma só sobrescrevesse o texto da outra, um erro real podia
+        // sumir da tela assim que a planilha do outro ano terminasse de carregar com sucesso.
+        // Por isso os erros ficam guardados aqui e continuam visíveis até serem corrigidos.
+        let errosCarregamentoFinanceiro = [];
+        function atualizarStatusCarregamentoFinanceiro() {
+            const s = document.getElementById('infoStatus');
+            if (!s) return;
+            s.textContent = errosCarregamentoFinanceiro.length > 0
+                ? errosCarregamentoFinanceiro.join(' | ')
+                : 'Dados carregados do Google Sheets';
+        }
+
         async function carregarPlanilhaFinanceira(config) {
             try {
-                const r = await fetch(`https://docs.google.com/spreadsheets/d/${config.sheetId}/gviz/tq?tqx=out:json&gid=${config.gid}`);
+                const filtroColunas = config.colunas ? `&tq=${encodeURIComponent('select ' + config.colunas)}` : '';
+                const r = await fetch(`https://docs.google.com/spreadsheets/d/${config.sheetId}/gviz/tq?tqx=out:json&gid=${config.gid}${filtroColunas}`);
                 if (!r.ok) {
                     throw new Error(`Falha HTTP ${r.status} ao buscar a planilha de ${config.rotulo}.`);
                 }
                 const t = await r.text();
                 const rows = parseRespostaGviz(t);
-                guardarELerDadosExcel(rows, config.anoForcado);
-                const s = document.getElementById('infoStatus');
-                if (s) s.textContent = 'Dados carregados do Google Sheets';
+                // guardarELerDadosExcel já registra sua própria mensagem detalhada (com as colunas
+                // encontradas) em errosCarregamentoFinanceiro e atualiza a linha de status quando
+                // falha — não é preciso (nem seria útil) empilhar um segundo aviso genérico aqui.
+                guardarELerDadosExcel(rows, config.anoForcado, config.rotulo);
+                atualizarStatusCarregamentoFinanceiro();
             } catch (e) {
                 console.warn(`Não foi possível carregar a planilha de ${config.rotulo}:`, e);
-                const s = document.getElementById('infoStatus');
-                if (s) s.textContent = `Erro ao carregar dados de ${config.rotulo}: ${(e && e.message) || e}`;
+                errosCarregamentoFinanceiro.push(`Erro ao carregar dados de ${config.rotulo}: ${(e && e.message) || e}`);
+                atualizarStatusCarregamentoFinanceiro();
             }
         }
 
@@ -680,8 +708,8 @@
             processarHistoricoEmpenhos();
         });
 
-        function guardarELerDadosExcel(rows, anoForcado) {
-            if (!rows || rows.length < 2) return;
+        function guardarELerDadosExcel(rows, anoForcado, rotulo) {
+            if (!rows || rows.length < 2) return false;
 
             const headerNorm = rows[0].map(normalizarTexto);
 
@@ -700,6 +728,18 @@
             const colSegReceita = localizarColuna(headerNorm, ['SEGREGACAO DE RECEITA'], []);
             // EMPENHO: usado para cruzar com a planilha de histórico de empenhos (aba Gastos por Tópico).
             const colEmpenho = localizarColuna(headerNorm, ['EMPENHO'], []);
+
+            // Se a coluna de classificação ou de valor não for encontrada, os dados entrariam
+            // errados (ex.: lendo FUNDO como se fosse CLASSIFICAÇÃO) sem nenhum aviso — melhor
+            // avisar claramente do que mostrar o Fluxo de Caixa com números errados ou zerados.
+            if (colClassificacao < 0 || colSaldoFinal < 0) {
+                const colunasEncontradas = rows[0].map(v => String(v || '').trim()).filter(Boolean).join(', ') || '(nenhuma)';
+                const msg = `Não encontrei as colunas CLASSIFICAÇÃO FINAL e/ou SALDO FINAL na planilha${rotulo ? ' de ' + rotulo : ''}. Colunas encontradas: ${colunasEncontradas}`;
+                console.warn(msg);
+                errosCarregamentoFinanceiro.push(msg);
+                atualizarStatusCarregamentoFinanceiro();
+                return false;
+            }
 
             rows.forEach((row, idx) => {
                 if (idx === 0 || !row || row.length === 0) return;
@@ -733,6 +773,7 @@
 
             definirMesIndicadoresPadrao();
             recalcularEFiltrar();
+            return true;
         }
 
         // Escolhe, dentro de uma lista de registros, o "ano" a considerar quando o filtro
