@@ -3426,6 +3426,13 @@
         // últimos são negativos). Na tabela por fundo já é o contrário do ponto de vista de quem
         // recebe: o valor repassado pelo Executivo entra POSITIVO (é entrada pro fundo) e o gasto
         // com verba livre entra NEGATIVO.
+        //
+        // Importante: no extrato, o SALDO FINAL (reg.saldo) de uma linha classificada como
+        // REPASSES já vem NEGATIVO (confirmado nos dados reais: DÉBITO positivo, SALDO FINAL
+        // negativo) — é o Executivo registrando a saída daquele valor da própria conta. Por isso,
+        // do lado do Executivo, "repasses enviados" é reg.saldo direto (já negativo); do lado do
+        // fundo que recebe, "repassado pelo Executivo" é -reg.saldo (inverte pra ficar positivo,
+        // já que é uma entrada pro fundo).
         function agregarExecutivoFonte100() {
             const receita = Array(12).fill(0);
             const repasses = Array(12).fill(0);
@@ -3439,7 +3446,7 @@
                     receita[reg.mesIdx] += reg.saldo * fator;
                 }
                 if (nomesRepasse.some(nome => reg.classificacao === nome || reg.classificacao.includes(nome))) {
-                    repasses[reg.mesIdx] -= reg.saldo;
+                    repasses[reg.mesIdx] += reg.saldo;
                 }
             });
 
@@ -3460,7 +3467,7 @@
             registrosBrutosExcel.forEach(reg => {
                 if (reg.fundo !== 'EXECUTIVO' || reg.ano !== ANO_ORDENS_PAGAMENTO) return;
                 if (reg.classificacao === fundo || reg.classificacao.includes(fundo)) {
-                    recebido[reg.mesIdx] += reg.saldo;
+                    recebido[reg.mesIdx] -= reg.saldo;
                 }
             });
 
@@ -3602,10 +3609,15 @@
         // lançamentos — é só o total de "Repasses enviados aos fundos", somando todos os fundos,
         // que passou a abrir por fundo em vez de cada transferência).
         function abrirDetalheRepasseEnviadoPara(fundo, mesIdx) {
-            const itens = registrosBrutosExcel.filter(reg =>
-                reg.fundo === 'EXECUTIVO' && reg.ano === ANO_ORDENS_PAGAMENTO && reg.mesIdx === mesIdx &&
-                (reg.classificacao === fundo || reg.classificacao.includes(fundo))
-            );
+            // O saldo dessas linhas vem negativo no extrato (é o Executivo registrando a saída);
+            // inverte pra positivo aqui, já que a linha "Repassado pelo Executivo" que abre esse
+            // detalhe também é mostrada positiva (é uma entrada, do ponto de vista do fundo).
+            const itens = registrosBrutosExcel
+                .filter(reg =>
+                    reg.fundo === 'EXECUTIVO' && reg.ano === ANO_ORDENS_PAGAMENTO && reg.mesIdx === mesIdx &&
+                    (reg.classificacao === fundo || reg.classificacao.includes(fundo))
+                )
+                .map(reg => ({ ...reg, saldo: -reg.saldo }));
             document.getElementById('painelTitulo').textContent = `Repasse enviado — ${fundo}`;
             document.getElementById('painelSubtitulo').textContent = `${MESES_NOMES[mesIdx]} • Fonte 100`;
             document.getElementById('painelBreadcrumb').innerHTML = '';
@@ -3615,13 +3627,15 @@
 
         // Detalhe da linha "Repasses enviados aos fundos" do Executivo: abre só o total por fundo
         // destino (FME, FMS, FMAS...) naquele mês — não desce até cada transferência individual.
+        // Mostra o valor positivo (magnitude do repasse), igual à linha "Repassado pelo Executivo"
+        // de cada fundo — só a linha-resumo do Executivo é que carrega o sinal negativo.
         function abrirDetalheRepasseEnviado(mesIdx) {
             const nomesRepasse = nomesRepasseDaEstrutura();
             const porFundo = nomesRepasse.map(nome => {
                 const total = registrosBrutosExcel
                     .filter(reg => reg.fundo === 'EXECUTIVO' && reg.ano === ANO_ORDENS_PAGAMENTO && reg.mesIdx === mesIdx &&
                         (reg.classificacao === nome || reg.classificacao.includes(nome)))
-                    .reduce((s, reg) => s + reg.saldo, 0);
+                    .reduce((s, reg) => s - reg.saldo, 0);
                 return { nome, valor: total };
             }).filter(g => Math.abs(g.valor) > 0.004).sort((a, b) => b.valor - a.valor);
 
