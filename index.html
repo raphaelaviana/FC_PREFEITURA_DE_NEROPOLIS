@@ -261,6 +261,10 @@
                 <i data-lucide="tags" class="w-4 h-4"></i>
                 Gastos por Tópico
             </button>
+            <button id="tabBtnRepasses" onclick="mudarAba('repasses')" type="button" class="tab-btn">
+                <i data-lucide="arrow-left-right" class="w-4 h-4"></i>
+                Repasses
+            </button>
         </div>
     </div>
 
@@ -456,6 +460,27 @@
                 </div>
                 <div id="painelTopicos" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 p-4"></div>
                 <div id="resumoTopicos" class="px-4 pb-4 text-xs text-slate-500"></div>
+            </div>
+
+        </div>
+
+        <!-- ABA: REPASSES -->
+        <div id="abaRepasses" class="hidden">
+
+            <div class="bg-white rounded-lg shadow-lg overflow-hidden border border-slate-200 mb-4">
+                <div class="bg-[#1b365d] text-white px-4 py-3 border-b-4 border-[#e65100]">
+                    <h3 class="text-sm font-bold">EXECUTIVO — RECURSOS PRÓPRIOS (FONTE 100)</h3>
+                    <p class="text-xs text-blue-200 mt-0.5">Quanto entrou de receita livre por mês e quanto saiu (repasses enviados aos fundos + despesas próprias pagas com verba livre) — pra mostrar se está havendo déficit nessa fonte. Dados de 2026. Clique num valor pra ver o detalhamento.</p>
+                </div>
+                <div id="listaExecutivoFonte100" class="overflow-x-auto"></div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow-lg overflow-hidden border border-slate-200 mb-4">
+                <div class="bg-[#1b365d] text-white px-4 py-3 border-b-4 border-[#e65100]">
+                    <h3 class="text-sm font-bold">REPASSES POR FUNDO</h3>
+                    <p class="text-xs text-blue-200 mt-0.5">Quanto o Executivo mandou pra cada fundo por mês e quanto o fundo gastou dessa verba livre. Dados de 2026. Clique num valor pra ver o detalhamento.</p>
+                </div>
+                <div id="listaRepassesPorFundo"></div>
             </div>
 
         </div>
@@ -659,7 +684,7 @@
             // Google Sheets só as colunas que o painel realmente usa (por letra, já que a API do
             // Sheets exige isso), cortando o tamanho da resposta bastante. Se essa planilha crescer
             // muito mais, pode ser necessário migrar para uma fonte já resumida por mês/classificação.
-            { sheetId: '15Ng1oHMjpN7Yu_Re-teK_HaTq1nS7oLs', gid: '1863214707', anoForcado: '2026', rotulo: '2026', colunas: 'A,D,F,K,O,U,W,X,Y,Z' },
+            { sheetId: '15Ng1oHMjpN7Yu_Re-teK_HaTq1nS7oLs', gid: '1863214707', anoForcado: '2026', rotulo: '2026', colunas: 'A,D,F,K,O,U,V,W,X,Y,Z' },
             { sheetId: '1JCRJCIXDoNeUpfS0f3I5WCkrvHWD-CSV', gid: '0', anoForcado: '2025', rotulo: '2025' }
         ];
 
@@ -704,6 +729,7 @@
             processarEmendas();
             processarEmendasImpositivas();
             processarHistoricoEmpenhos();
+            processarOrdensPagamento();
         });
 
         function guardarELerDadosExcel(rows, anoForcado, rotulo) {
@@ -726,6 +752,9 @@
             const colSegReceita = localizarColuna(headerNorm, ['SEGREGACAO DE RECEITA'], []);
             // EMPENHO: usado para cruzar com a planilha de histórico de empenhos (aba Gastos por Tópico).
             const colEmpenho = localizarColuna(headerNorm, ['EMPENHO'], []);
+            // CÓDIGO RECEITA: usado na aba Repasses pra separar a receita que entra na fonte 100
+            // (recursos livres) do restante — só existe/importa em linhas de receita (crédito).
+            const colCodigoReceita = localizarColuna(headerNorm, ['CODIGO RECEITA'], []);
 
             // Se a coluna de classificação ou de valor não for encontrada, os dados entrariam
             // errados (ex.: lendo FUNDO como se fosse CLASSIFICAÇÃO) sem nenhum aviso — melhor
@@ -765,12 +794,91 @@
                     segReceita: colSegReceita >= 0 ? String(row[colSegReceita] || '').trim() : '',
                     dataFormatada: infoData.texto,
                     dataOrd: infoData.ord,
-                    empenho: colEmpenho >= 0 ? String(row[colEmpenho] || '').trim() : ''
+                    empenho: colEmpenho >= 0 ? String(row[colEmpenho] || '').trim() : '',
+                    codigoReceita: colCodigoReceita >= 0 ? String(row[colCodigoReceita] || '').trim() : ''
                 });
             });
 
             definirMesIndicadoresPadrao();
             recalcularEFiltrar();
+            return true;
+        }
+
+        /* ==================== ABA REPASSES (ordens de pagamento por fundo, verba livre) ====================
+           A Daniella extraiu, do sistema da Prefeitura, um relatório de "ordem de pagamento" por
+           fundo (Executivo + FMAS/FMDPI/FME/FMMA/FMS), já filtrado só pra fonte 100 (verba livre) —
+           confirmado nos dados (toda a coluna FONTE = 100). Cada arquivo foi convertido de .xlsx pra
+           Planilhas Google (mesma pasta do Drive) pra poder ser buscado pelo gviz, igual todo o
+           resto do painel, e ela vai atualizando esses arquivos mês a mês. */
+        const PLANILHAS_ORDENS_PAGAMENTO = [
+            { sheetId: '1tiA1rnJeSF2sV4G_FVgL-BQxNjGocAQ5', fundo: 'EXECUTIVO' },
+            { sheetId: '11JLrDUQafBPIHGYxzQG6AYps_uPqImmM', fundo: 'FMAS' },
+            { sheetId: '1hNQPn37U2RDIBJ0T1HvE04lIMrn3ztHI', fundo: 'FMDPI' },
+            { sheetId: '1k3QX7LKIj35GfXWXSpy1k__C2g-LTNq4', fundo: 'FME' },
+            { sheetId: '116137DhF9XzqC0YTI5DD8WdPoDEfDJGz', fundo: 'FMMA' },
+            { sheetId: '1t2dfIVKDrvENFDXaVbsFf2950Ia3lvlo', fundo: 'FMS' }
+        ];
+
+        let registrosOrdensPagamento = [];
+
+        async function processarOrdensPagamento() {
+            await Promise.all(PLANILHAS_ORDENS_PAGAMENTO.map(carregarOrdemPagamento));
+            renderRepasses();
+        }
+
+        async function carregarOrdemPagamento(config) {
+            try {
+                const r = await fetch(`https://docs.google.com/spreadsheets/d/${config.sheetId}/gviz/tq?tqx=out:json`);
+                if (!r.ok) {
+                    throw new Error(`Falha HTTP ${r.status} ao buscar a ordem de pagamento de ${config.fundo}.`);
+                }
+                const t = await r.text();
+                const rows = parseRespostaGviz(t);
+                guardarOrdemPagamento(rows, config.fundo);
+            } catch (e) {
+                console.warn(`Não foi possível carregar a ordem de pagamento de ${config.fundo}:`, e);
+                errosCarregamentoFinanceiro.push(`Erro ao carregar ordem de pagamento de ${config.fundo}: ${(e && e.message) || e}`);
+                atualizarStatusCarregamentoFinanceiro();
+            }
+        }
+
+        function guardarOrdemPagamento(rows, fundo) {
+            if (!rows || rows.length < 2) return false;
+
+            const headerNorm = rows[0].map(normalizarTexto);
+            const colValor = localizarColuna(headerNorm, ['VALOR'], []);
+            const colAnulado = localizarColuna(headerNorm, [], ['ANULADO']);
+            const colMes = localizarColuna(headerNorm, ['MES'], []);
+            const colFornecedor = localizarColuna(headerNorm, ['FORNECEDOR'], []);
+            const colEmpenho = localizarColuna(headerNorm, ['EMPENHO'], []);
+            const colCodigo = localizarColuna(headerNorm, ['CODIGO'], []);
+
+            if (colValor < 0 || colMes < 0) {
+                const msg = `Não encontrei as colunas VALOR e/ou MÊS na planilha de ordem de pagamento de ${fundo}.`;
+                console.warn(msg);
+                errosCarregamentoFinanceiro.push(msg);
+                atualizarStatusCarregamentoFinanceiro();
+                return false;
+            }
+
+            rows.forEach((row, idx) => {
+                if (idx === 0 || !row || row.length === 0) return;
+
+                const bruto = parseNumero(row[colValor]);
+                const anulado = colAnulado >= 0 ? parseNumero(row[colAnulado]) : 0;
+                const valor = bruto - anulado;
+                if (!valor) return;
+
+                registrosOrdensPagamento.push({
+                    fundo,
+                    mesIdx: resolverMesIdx(colMes >= 0 ? row[colMes] : null, { texto: '-', ord: 0 }),
+                    valor,
+                    fornecedor: colFornecedor >= 0 ? String(row[colFornecedor] || '').trim() : '',
+                    empenho: colEmpenho >= 0 ? String(row[colEmpenho] || '').trim() : '',
+                    codigo: colCodigo >= 0 ? String(row[colCodigo] || '').trim() : ''
+                });
+            });
+
             return true;
         }
 
@@ -1199,7 +1307,8 @@
                 indicadores: { el: document.getElementById('abaIndicadores'), btn: document.getElementById('tabBtnIndicadores') },
                 saldo: { el: document.getElementById('abaSaldo'), btn: document.getElementById('tabBtnSaldo') },
                 emendas: { el: document.getElementById('abaEmendas'), btn: document.getElementById('tabBtnEmendas') },
-                topicos: { el: document.getElementById('abaTopicos'), btn: document.getElementById('tabBtnTopicos') }
+                topicos: { el: document.getElementById('abaTopicos'), btn: document.getElementById('tabBtnTopicos') },
+                repasses: { el: document.getElementById('abaRepasses'), btn: document.getElementById('tabBtnRepasses') }
             };
             if (!paineis[aba]) return;
 
@@ -1219,6 +1328,7 @@
             if (aba === 'saldo') renderSaldosIndicador();
             if (aba === 'emendas') renderEmendas();
             if (aba === 'topicos') renderGastosPorTopico();
+            if (aba === 'repasses') renderRepasses();
         }
 
         function obterClassificacoesDespesa(excluir) {
@@ -1715,6 +1825,23 @@
             const livre = ['00', '01', '02'].includes(especificacao);
             return { texto, especificacao, detalhamento, chave: `${especificacao}.${detalhamento}`, livre };
         }
+
+        // Códigos de receita (coluna "CÓDIGO RECEITA" do extrato) que a Daniella levantou como
+        // receita da fonte 100 (recursos livres/não vinculados) do Executivo — usado na aba
+        // Repasses pra saber quanto entrou de receita livre a cada mês. No extrato, esse código
+        // vem sem o último segmento do código de receita completo (ex.: "1112.50.0.1" e
+        // "1112.50.0.4" — variações de Principal/Multa/Dívida Ativa etc. — chegam os dois como
+        // "1112500"), por isso a lista abaixo já está reduzida aos valores distintos de 3 segmentos
+        // que ela passou.
+        const CODIGOS_RECEITA_FONTE100 = new Set([
+            '1112500', '1112530', '1113031', '1114511', '1121010', '1121040', '1122010',
+            '1711511', '1711512', '1711520', '1721500', '1721510', '1721520', '1729990',
+            '1922990', '9711511', '9711520', '9721500', '9721510', '9721520', '9112530',
+            '1241500'
+        ]);
+        // Exceção pontual pedida pela Daniella: desse código só conta metade do valor arrecadado
+        // como fonte 100 (o resto é de outra fonte/rateio).
+        const FATOR_RECEITA_FONTE100 = { '1241500': 0.5 };
 
         // Retorna { texto, confirmado }. "confirmado" = true quando a descrição veio da lista
         // que a própria Prefeitura passou (código completo, por fundo); false quando é só uma
@@ -3271,6 +3398,211 @@
                         <span class="text-sm font-semibold text-slate-800 whitespace-nowrap">${formatarValor(it.valor)}</span>
                     </div>
                     <p class="text-sm text-slate-600 mt-0.5">${escapeHtml(limitarTamanho(String(it.historico || ''), 140))}</p>
+                </div>
+            `).join('');
+        }
+
+        /* ==================== ABA REPASSES: agregação e renderização ====================
+           Duas partes, conforme pedido: (1) o Executivo na fonte 100 — quanto entrou de receita
+           livre por mês e quanto saiu (repasses enviados aos fundos + despesas próprias pagas com
+           verba livre) — pra ver se há déficit; (2) por fundo (FMAS/FMDPI/FME/FMMA/FMS) — quanto o
+           Executivo repassou por mês e quanto o fundo gastou dessa verba livre. Os repasses saem do
+           extrato do Executivo (mesma classificação já usada na linha "REPASSES" do Fluxo de
+           Caixa); o que cada lado gastou vem das planilhas de ordem de pagamento (registrosOrdensPagamento).
+           Só cobre 2026 porque é o único ano com ordem de pagamento disponível. */
+
+        const MESES_ABREV_REPASSES = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
+        const FUNDOS_REPASSE = ['FMAS', 'FMDPI', 'FME', 'FMMA', 'FMS'];
+        const ANO_ORDENS_PAGAMENTO = '2026';
+
+        function nomesRepasseDaEstrutura() {
+            const cat = estruturaBase.find(c => c.descricao === 'REPASSES');
+            return cat ? cat.filhos.map(f => f.descricao.toUpperCase()) : [];
+        }
+
+        function agregarExecutivoFonte100() {
+            const receita = Array(12).fill(0);
+            const repasses = Array(12).fill(0);
+            const despesasProprias = Array(12).fill(0);
+            const nomesRepasse = nomesRepasseDaEstrutura();
+
+            registrosBrutosExcel.forEach(reg => {
+                if (reg.fundo !== 'EXECUTIVO' || reg.ano !== ANO_ORDENS_PAGAMENTO) return;
+                if (reg.codigoReceita && CODIGOS_RECEITA_FONTE100.has(reg.codigoReceita)) {
+                    const fator = FATOR_RECEITA_FONTE100[reg.codigoReceita] || 1;
+                    receita[reg.mesIdx] += reg.saldo * fator;
+                }
+                if (nomesRepasse.some(nome => reg.classificacao === nome || reg.classificacao.includes(nome))) {
+                    repasses[reg.mesIdx] += reg.saldo;
+                }
+            });
+
+            registrosOrdensPagamento.forEach(r => {
+                if (r.fundo !== 'EXECUTIVO') return;
+                despesasProprias[r.mesIdx] += r.valor;
+            });
+
+            const saida = despesasProprias.map((v, i) => v + repasses[i]);
+            const saldo = receita.map((v, i) => v - saida[i]);
+            return { receita, repasses, despesasProprias, saida, saldo };
+        }
+
+        function agregarFundoRepasse(fundo) {
+            const recebido = Array(12).fill(0);
+            const gasto = Array(12).fill(0);
+
+            registrosBrutosExcel.forEach(reg => {
+                if (reg.fundo !== 'EXECUTIVO' || reg.ano !== ANO_ORDENS_PAGAMENTO) return;
+                if (reg.classificacao === fundo || reg.classificacao.includes(fundo)) {
+                    recebido[reg.mesIdx] += reg.saldo;
+                }
+            });
+
+            registrosOrdensPagamento.forEach(r => {
+                if (r.fundo !== fundo) return;
+                gasto[r.mesIdx] += r.valor;
+            });
+
+            const saldo = recebido.map((v, i) => v - gasto[i]);
+            return { recebido, gasto, saldo };
+        }
+
+        function linhaMatrizRepasses(label, valores, onClickMes, classeExtra, ehResultado) {
+            const total = valores.reduce((s, v) => s + v, 0);
+            const celulas = valores.map((v, i) => {
+                const clicavel = typeof onClickMes === 'function' && Math.abs(v) > 0.004;
+                const abrir = clicavel ? onClickMes(i) : '';
+                return clicavel
+                    ? `<td class="text-right cursor-pointer hover:underline hover:text-[#e65100]" onclick="${abrir}">${formatarValor(v, ehResultado)}</td>`
+                    : `<td class="text-right">${formatarValor(v, ehResultado)}</td>`;
+            }).join('');
+            return `<tr class="${classeExtra || ''}"><td class="text-left font-medium whitespace-nowrap">${escapeHtml(label)}</td>${celulas}<td class="text-right font-bold col-total">${formatarValor(total, ehResultado)}</td></tr>`;
+        }
+
+        function renderRepasses() {
+            const exec = agregarExecutivoFonte100();
+            const cabecalho = `<thead><tr>
+                <th class="text-left w-56 min-w-[200px]">DESCRIÇÃO</th>
+                ${MESES_ABREV_REPASSES.map(m => `<th class="text-right min-w-[80px]">${m}</th>`).join('')}
+                <th class="text-right min-w-[100px] col-total">TOTAL</th>
+            </tr></thead>`;
+
+            const containerExec = document.getElementById('listaExecutivoFonte100');
+            if (containerExec) {
+                containerExec.innerHTML = `<table class="table-custom tabular-nums w-full">
+                    ${cabecalho}
+                    <tbody>
+                        ${linhaMatrizRepasses('Receita própria (fonte 100)', exec.receita, null)}
+                        ${linhaMatrizRepasses('Repasses enviados aos fundos', exec.repasses, i => `abrirDetalheRepasseEnviado(${i})`)}
+                        ${linhaMatrizRepasses('Despesas próprias (verba livre)', exec.despesasProprias, i => `abrirDetalheOrdemPagamento('EXECUTIVO', ${i})`)}
+                        ${linhaMatrizRepasses('Saída total (repasses + despesas)', exec.saida, null, 'border-t border-slate-300')}
+                        ${linhaMatrizRepasses('Saldo do mês (déficit/superávit)', exec.saldo, null, 'font-bold border-t-2 border-slate-800', true)}
+                    </tbody>
+                </table>`;
+            }
+
+            const containerFundos = document.getElementById('listaRepassesPorFundo');
+            if (containerFundos) {
+                containerFundos.innerHTML = FUNDOS_REPASSE.map(fundo => {
+                    const dados = agregarFundoRepasse(fundo);
+                    return `<div class="border-t border-slate-200 first:border-t-0">
+                        <p class="text-xs font-bold text-slate-500 px-4 pt-3 pb-1">${escapeHtml(fundo)}</p>
+                        <div class="overflow-x-auto pb-3">
+                            <table class="table-custom tabular-nums w-full">
+                                ${cabecalho}
+                                <tbody>
+                                    ${linhaMatrizRepasses('Repassado pelo Executivo', dados.recebido, i => `abrirDetalheRepasseEnviadoPara(${escapeHtml(JSON.stringify(fundo))}, ${i})`)}
+                                    ${linhaMatrizRepasses('Gasto com verba livre', dados.gasto, i => `abrirDetalheOrdemPagamento(${escapeHtml(JSON.stringify(fundo))}, ${i})`)}
+                                    ${linhaMatrizRepasses('Saldo (repassado − gasto)', dados.saldo, null, 'font-bold border-t-2 border-slate-800', true)}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>`;
+                }).join('');
+            }
+
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
+
+        // Detalhe: pagamentos individuais (fornecedor, nº da OP, empenho, valor) que compõem o
+        // total de "despesas próprias"/"gasto com verba livre" de um fundo num mês.
+        function abrirDetalheOrdemPagamento(fundo, mesIdx) {
+            const itens = registrosOrdensPagamento
+                .filter(r => r.fundo === fundo && r.mesIdx === mesIdx)
+                .sort((a, b) => b.valor - a.valor);
+
+            document.getElementById('painelTitulo').textContent = fundo === 'EXECUTIVO' ? 'Despesas próprias (verba livre)' : `${fundo} — gasto com verba livre`;
+            document.getElementById('painelSubtitulo').textContent = `${MESES_NOMES[mesIdx]} • Fonte 100`;
+            document.getElementById('painelBreadcrumb').innerHTML = '';
+            renderDetalheOrdemPagamentoLista(itens);
+            abrirOverlayPainel();
+        }
+
+        // Detalhe: os lançamentos de repasse (extrato do Executivo) que compõem o total enviado a
+        // um fundo específico num mês.
+        function abrirDetalheRepasseEnviadoPara(fundo, mesIdx) {
+            const itens = registrosBrutosExcel.filter(reg =>
+                reg.fundo === 'EXECUTIVO' && reg.ano === ANO_ORDENS_PAGAMENTO && reg.mesIdx === mesIdx &&
+                (reg.classificacao === fundo || reg.classificacao.includes(fundo))
+            );
+            document.getElementById('painelTitulo').textContent = `Repasse enviado — ${fundo}`;
+            document.getElementById('painelSubtitulo').textContent = `${MESES_NOMES[mesIdx]} • Fonte 100`;
+            document.getElementById('painelBreadcrumb').innerHTML = '';
+            renderDetalheTransacoesExtrato(itens);
+            abrirOverlayPainel();
+        }
+
+        // Detalhe: todos os repasses enviados a qualquer fundo num mês (soma da linha "Repasses
+        // enviados aos fundos" da tabela do Executivo).
+        function abrirDetalheRepasseEnviado(mesIdx) {
+            const nomesRepasse = nomesRepasseDaEstrutura();
+            const itens = registrosBrutosExcel.filter(reg =>
+                reg.fundo === 'EXECUTIVO' && reg.ano === ANO_ORDENS_PAGAMENTO && reg.mesIdx === mesIdx &&
+                nomesRepasse.some(nome => reg.classificacao === nome || reg.classificacao.includes(nome))
+            );
+            document.getElementById('painelTitulo').textContent = 'Repasses enviados aos fundos';
+            document.getElementById('painelSubtitulo').textContent = `${MESES_NOMES[mesIdx]} • Fonte 100`;
+            document.getElementById('painelBreadcrumb').innerHTML = '';
+            renderDetalheTransacoesExtrato(itens);
+            abrirOverlayPainel();
+        }
+
+        function renderDetalheOrdemPagamentoLista(itens) {
+            const contentEl = document.getElementById('painelConteudo');
+            if (itens.length === 0) {
+                contentEl.innerHTML = '<p class="text-slate-400 text-sm text-center py-10">Nenhum pagamento encontrado neste mês.</p>';
+                return;
+            }
+            const total = itens.reduce((s, it) => s + it.valor, 0);
+            contentEl.innerHTML = `
+                <p class="text-xs text-slate-400 mb-2">${itens.length} pagamento${itens.length === 1 ? '' : 's'} • total ${formatarValor(total)}</p>
+            ` + itens.map(it => `
+                <div class="py-2.5 border-b border-slate-100">
+                    <div class="flex items-center justify-between gap-3">
+                        <span class="text-xs font-mono text-slate-400">OP ${escapeHtml(it.codigo || '-')}${it.empenho ? ' • Emp. ' + escapeHtml(it.empenho) : ''}</span>
+                        <span class="text-sm font-semibold text-slate-800 whitespace-nowrap">${formatarValor(it.valor)}</span>
+                    </div>
+                    <p class="text-sm text-slate-600 mt-0.5">${escapeHtml(it.fornecedor || '-')}</p>
+                </div>
+            `).join('');
+        }
+
+        function renderDetalheTransacoesExtrato(itens) {
+            const contentEl = document.getElementById('painelConteudo');
+            if (itens.length === 0) {
+                contentEl.innerHTML = '<p class="text-slate-400 text-sm text-center py-10">Nenhum lançamento encontrado.</p>';
+                return;
+            }
+            const total = itens.reduce((s, it) => s + it.saldo, 0);
+            contentEl.innerHTML = `
+                <p class="text-xs text-slate-400 mb-2">${itens.length} lançamento${itens.length === 1 ? '' : 's'} • total ${formatarValor(total)}</p>
+            ` + itens.map(it => `
+                <div class="py-2.5 border-b border-slate-100">
+                    <div class="flex items-center justify-between gap-3">
+                        <span class="text-xs text-slate-400">${escapeHtml(it.dataFormatada || '-')}</span>
+                        <span class="text-sm font-semibold text-slate-800 whitespace-nowrap">${formatarValor(it.saldo)}</span>
+                    </div>
+                    <p class="text-sm text-slate-600 mt-0.5">${escapeHtml(it.descricao || '-')}</p>
                 </div>
             `).join('');
         }
