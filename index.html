@@ -3053,29 +3053,27 @@
         }
 
         // Rótulo específico para Frota/Combustível: tenta achar a secretaria/órgão dono dos
-        // veículos (o texto quase sempre segue o padrão "...COMBUSTÍVEL DOS VEÍCULOS DA/DO X...")
-        // e combina com o tipo (Combustível/Manutenção/Outros), pra dar uma noção separada dos
-        // dois em vez de só uma linha por secretaria. Se não achar o padrão de secretaria, cai no
-        // rótulo genérico, mas ainda prefixado com o tipo.
-        function extrairSecretariaFrota(historicoOriginal) {
-            const tipo = classificarTipoFrota(historicoOriginal);
+        // veículos (o texto quase sempre segue o padrão "...COMBUSTÍVEL DOS VEÍCULOS DA/DO X...").
+        // Usado dentro de um tipo já filtrado (Combustível ou Manutenção) — o painel de Frota
+        // abre primeiro por tipo, depois por secretaria dentro do tipo escolhido.
+        function extrairSecretariaSomente(historicoOriginal) {
             const historico = String(historicoOriginal || '');
             // "VEÍCULOS E MÁQUINAS DA/DO X" também é comum (frota de veículos + maquinário
             // juntos) — o "E MÁQUINAS" é opcional pra cobrir os dois jeitos de escrever.
             const m = historico.match(/VE[ÍI]CULOS(?:\s+E\s+M[ÁA]QUINAS)?\s+D[AOE]S?\s+([\s\S]+)/i);
-            if (!m) return `${tipo} — ${extrairRotuloGasto(historicoOriginal)}`;
+            if (!m) return extrairRotuloGasto(historicoOriginal);
 
             let resto = m[1];
             const posCorte = encontrarMarcador(resto, MARCADORES_CORTE, 0);
             if (posCorte >= 0) resto = resto.slice(0, posCorte);
             resto = resto.trim().replace(/^["',.;:\-]+/, '').replace(/["',.;:\-]+$/, '').trim();
-            if (!resto) return `${tipo} — ${extrairRotuloGasto(historicoOriginal)}`;
+            if (!resto) return extrairRotuloGasto(historicoOriginal);
 
             const normalizado = normalizarTexto(resto);
             for (const c of CANONICOS_SECRETARIA) {
-                if (normalizado.includes(c.padrao)) return `${tipo} — ${c.nome}`;
+                if (normalizado.includes(c.padrao)) return c.nome;
             }
-            return `${tipo} — ${paraCasoDeTitulo(limitarTamanho(resto, 60))}`;
+            return paraCasoDeTitulo(limitarTamanho(resto, 60));
         }
 
         // Rótulo específico para Saúde: em vez de uma linha por variação de texto (cada remédio,
@@ -3130,40 +3128,36 @@
             });
         }
 
-        function abrirPainelTopico(chave) {
-            const meta = TOPICOS_GASTO.find(t => t.chave === chave) || META_NAO_CLASSIFICADO;
-            const grupo = ultimoAgregadoTopicos ? (ultimoAgregadoTopicos[chave] || ultimoAgregadoTopicos.semHistorico) : null;
-            // Frota/Combustível é agrupado por secretaria dona dos veículos; Saúde, por categoria
-            // ampla (medicamentos, óculos, exames, cirurgia); os demais tópicos, por obra/evento —
-            // em todos os casos, uma linha resumida por grupo, sem número de empenho.
-            const funcaoRotulo = chave === 'frota' ? extrairSecretariaFrota : (chave === 'saude' ? extrairRotuloSaude : extrairRotuloGasto);
-            topicoPainelAtual = { chave, meta, grupo, funcaoRotulo };
-
-            document.getElementById('painelTitulo').textContent = meta.nome;
-            const anoSelecionado = document.getElementById('selectAno').value.toUpperCase();
-            const fundoSelecionado = document.getElementById('selectFundo').value.toUpperCase();
-            document.getElementById('painelSubtitulo').textContent = `${fundoSelecionado} • ${anoSelecionado === 'TODOS' ? 'todos os anos' : anoSelecionado}`;
-            renderBreadcrumbTopico([{ label: meta.nome }]);
-
+        // Renderiza uma lista de linhas clicáveis (nome + valor) dentro do painel — usado em todos
+        // os níveis (tipo, secretaria, obra/evento, categoria). construirOnClick(it) monta o
+        // atributo onclick de cada linha, já que cada nível precisa passar argumentos diferentes
+        // pro próximo clique (ex.: nível 2 de Frota precisa levar o "tipo" junto com a secretaria).
+        function renderLinhasPainel(itens, construirOnClick) {
             const contentEl = document.getElementById('painelConteudo');
-
-            if (!grupo || grupo.itens.size === 0) {
-                contentEl.innerHTML = '<p class="text-slate-400 text-sm text-center py-6">Nenhum empenho encontrado neste tópico, com os filtros atuais.</p>';
-            } else {
-                const itens = agruparItensPorRotulo([...grupo.itens.values()], funcaoRotulo).sort((a, b) => b.valor - a.valor);
-                contentEl.innerHTML = itens.map(it => `
-                    <button type="button" onclick="abrirDetalheTopico(${escapeHtml(JSON.stringify(it.nome))})" class="w-full flex items-center justify-between gap-3 py-2.5 border-b border-slate-100 text-left hover:bg-slate-50 transition-colors">
-                        <span class="text-sm text-slate-700">${escapeHtml(it.nome)}</span>
-                        <span class="flex items-center gap-1.5 shrink-0">
-                            <span class="text-sm font-semibold text-slate-800 whitespace-nowrap">${formatarValor(it.valor)}</span>
-                            <i data-lucide="chevron-right" class="w-3.5 h-3.5 text-slate-300"></i>
-                        </span>
-                    </button>
-                `).join('');
+            if (itens.length === 0) {
+                contentEl.innerHTML = '<p class="text-slate-400 text-sm text-center py-6">Nenhum empenho encontrado neste grupo, com os filtros atuais.</p>';
+                return;
             }
+            contentEl.innerHTML = itens.map(it => `
+                <button type="button" onclick="${construirOnClick(it)}" class="w-full flex items-center justify-between gap-3 py-2.5 border-b border-slate-100 text-left hover:bg-slate-50 transition-colors">
+                    <span class="text-sm text-slate-700">${escapeHtml(it.nome)}</span>
+                    <span class="flex items-center gap-1.5 shrink-0">
+                        <span class="text-sm font-semibold text-slate-800 whitespace-nowrap">${formatarValor(it.valor)}</span>
+                        <i data-lucide="chevron-right" class="w-3.5 h-3.5 text-slate-300"></i>
+                    </span>
+                </button>
+            `).join('');
+        }
 
+        function onClickAbrirDetalheTopico(it) {
+            return `abrirDetalheTopico(${escapeHtml(JSON.stringify(it.nome))})`;
+        }
+        function onClickAbrirFrotaPorSecretaria(it) {
+            return `abrirFrotaPorSecretaria(${escapeHtml(JSON.stringify(it.nome))})`;
+        }
+
+        function abrirOverlayPainel() {
             if (typeof lucide !== 'undefined') lucide.createIcons();
-
             const overlay = document.getElementById('painelOverlay');
             const painel = document.getElementById('painelLateral');
             overlay.classList.remove('hidden');
@@ -3172,9 +3166,79 @@
             });
         }
 
-        // Nível 2: o que compõe o valor de um grupo específico (ex.: "Carnaval") — número do
-        // empenho, uma breve descrição e o valor de cada um. É o jeito de conferir/auditar a
-        // soma mostrada no nível 1, sem precisar sair do painel.
+        function abrirPainelTopico(chave) {
+            const meta = TOPICOS_GASTO.find(t => t.chave === chave) || META_NAO_CLASSIFICADO;
+            const grupo = ultimoAgregadoTopicos ? (ultimoAgregadoTopicos[chave] || ultimoAgregadoTopicos.semHistorico) : null;
+            // Saúde é agrupado por categoria ampla (medicamentos, óculos, exames, cirurgia); os
+            // demais tópicos (exceto Frota, que tem sua própria navegação em 3 níveis logo abaixo),
+            // por obra/evento — uma linha resumida por grupo, sem número de empenho.
+            const funcaoRotulo = chave === 'saude' ? extrairRotuloSaude : extrairRotuloGasto;
+            topicoPainelAtual = { chave, meta, grupo, funcaoRotulo };
+
+            document.getElementById('painelTitulo').textContent = meta.nome;
+            const anoSelecionado = document.getElementById('selectAno').value.toUpperCase();
+            const fundoSelecionado = document.getElementById('selectFundo').value.toUpperCase();
+            document.getElementById('painelSubtitulo').textContent = `${fundoSelecionado} • ${anoSelecionado === 'TODOS' ? 'todos os anos' : anoSelecionado}`;
+            renderBreadcrumbTopico([{ label: meta.nome }]);
+
+            if (!grupo || grupo.itens.size === 0) {
+                renderLinhasPainel([], onClickAbrirDetalheTopico);
+            } else if (chave === 'frota') {
+                // Nível 1 de Frota: separa por tipo (Combustível/Manutenção/Outros) em vez de por
+                // secretaria — a secretaria vem no nível 2, ao clicar no tipo.
+                const itens = agruparItensPorRotulo([...grupo.itens.values()], classificarTipoFrota).sort((a, b) => b.valor - a.valor);
+                renderLinhasPainel(itens, onClickAbrirFrotaPorSecretaria);
+            } else {
+                const itens = agruparItensPorRotulo([...grupo.itens.values()], funcaoRotulo).sort((a, b) => b.valor - a.valor);
+                renderLinhasPainel(itens, onClickAbrirDetalheTopico);
+            }
+
+            abrirOverlayPainel();
+        }
+
+        // Nível 2 de Frota: dentro do tipo escolhido (Combustível ou Manutenção), agrupa por
+        // secretaria dona dos veículos.
+        function abrirFrotaPorSecretaria(tipo) {
+            if (!topicoPainelAtual || !topicoPainelAtual.grupo) return;
+            const { meta, grupo } = topicoPainelAtual;
+
+            document.getElementById('painelTitulo').textContent = tipo;
+            renderBreadcrumbTopico([
+                { label: meta.nome, onClick: () => abrirPainelTopico(topicoPainelAtual.chave) },
+                { label: tipo }
+            ]);
+
+            const itensDoTipo = [...grupo.itens.values()].filter(it => classificarTipoFrota(it.historico) === tipo);
+            const itens = agruparItensPorRotulo(itensDoTipo, extrairSecretariaSomente).sort((a, b) => b.valor - a.valor);
+            renderLinhasPainel(itens, it => `abrirDetalheFrota(${escapeHtml(JSON.stringify(tipo))}, ${escapeHtml(JSON.stringify(it.nome))})`);
+
+            abrirOverlayPainel();
+        }
+
+        // Nível 3 de Frota: número do empenho, breve descrição e valor — dentro do tipo e da
+        // secretaria escolhidos.
+        function abrirDetalheFrota(tipo, secretaria) {
+            if (!topicoPainelAtual || !topicoPainelAtual.grupo) return;
+            const { meta, grupo } = topicoPainelAtual;
+
+            document.getElementById('painelTitulo').textContent = secretaria;
+            renderBreadcrumbTopico([
+                { label: meta.nome, onClick: () => abrirPainelTopico(topicoPainelAtual.chave) },
+                { label: tipo, onClick: () => abrirFrotaPorSecretaria(tipo) },
+                { label: secretaria }
+            ]);
+
+            const itensDoGrupo = [...grupo.itens.values()]
+                .filter(it => classificarTipoFrota(it.historico) === tipo && (extrairSecretariaSomente(it.historico) || 'Outros') === secretaria)
+                .sort((a, b) => b.valor - a.valor);
+
+            renderDetalheEmpenhos(itensDoGrupo);
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
+
+        // Nível 2 dos demais tópicos: o que compõe o valor de um grupo específico (ex.:
+        // "Carnaval") — número do empenho, uma breve descrição e o valor de cada um. É o jeito de
+        // conferir/auditar a soma mostrada no nível 1, sem precisar sair do painel.
         function abrirDetalheTopico(nomeRotulo) {
             if (!topicoPainelAtual || !topicoPainelAtual.grupo) return;
             const { meta, grupo, funcaoRotulo } = topicoPainelAtual;
@@ -3189,6 +3253,13 @@
                 .filter(it => (funcaoRotulo(it.historico) || 'Outros') === nomeRotulo)
                 .sort((a, b) => b.valor - a.valor);
 
+            renderDetalheEmpenhos(itensDoGrupo);
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
+
+        // Lista final (número do empenho, breve descrição, valor) — compartilhada pelo nível de
+        // detalhe de Frota e pelo nível de detalhe dos demais tópicos.
+        function renderDetalheEmpenhos(itensDoGrupo) {
             const contentEl = document.getElementById('painelConteudo');
             const totalGrupo = itensDoGrupo.reduce((s, it) => s + it.valor, 0);
             contentEl.innerHTML = `
@@ -3202,8 +3273,6 @@
                     <p class="text-sm text-slate-600 mt-0.5">${escapeHtml(limitarTamanho(String(it.historico || ''), 140))}</p>
                 </div>
             `).join('');
-
-            if (typeof lucide !== 'undefined') lucide.createIcons();
         }
 
         recalcularEFiltrar();
