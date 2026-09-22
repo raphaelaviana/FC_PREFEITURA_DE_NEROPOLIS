@@ -3420,6 +3420,12 @@
             return cat ? cat.filhos.map(f => f.descricao.toUpperCase()) : [];
         }
 
+        // Convenção de sinal (pedida pela Daniella): na tabela do Executivo, repasses enviados e
+        // despesas próprias entram NEGATIVOS (são saída de caixa da fonte 100), então o saldo do
+        // mês é simplesmente receita + repasses + despesas (a soma já subtrai, porque os dois
+        // últimos são negativos). Na tabela por fundo já é o contrário do ponto de vista de quem
+        // recebe: o valor repassado pelo Executivo entra POSITIVO (é entrada pro fundo) e o gasto
+        // com verba livre entra NEGATIVO.
         function agregarExecutivoFonte100() {
             const receita = Array(12).fill(0);
             const repasses = Array(12).fill(0);
@@ -3433,17 +3439,17 @@
                     receita[reg.mesIdx] += reg.saldo * fator;
                 }
                 if (nomesRepasse.some(nome => reg.classificacao === nome || reg.classificacao.includes(nome))) {
-                    repasses[reg.mesIdx] += reg.saldo;
+                    repasses[reg.mesIdx] -= reg.saldo;
                 }
             });
 
             registrosOrdensPagamento.forEach(r => {
                 if (r.fundo !== 'EXECUTIVO') return;
-                despesasProprias[r.mesIdx] += r.valor;
+                despesasProprias[r.mesIdx] -= r.valor;
             });
 
             const saida = despesasProprias.map((v, i) => v + repasses[i]);
-            const saldo = receita.map((v, i) => v - saida[i]);
+            const saldo = receita.map((v, i) => v + repasses[i] + despesasProprias[i]);
             return { receita, repasses, despesasProprias, saida, saldo };
         }
 
@@ -3460,11 +3466,50 @@
 
             registrosOrdensPagamento.forEach(r => {
                 if (r.fundo !== fundo) return;
-                gasto[r.mesIdx] += r.valor;
+                gasto[r.mesIdx] -= r.valor;
             });
 
-            const saldo = recebido.map((v, i) => v - gasto[i]);
+            const saldo = recebido.map((v, i) => v + gasto[i]);
             return { recebido, gasto, saldo };
+        }
+
+        // Índice empenho → TCM, construído a partir do extrato (mesma fonte já usada na aba Fluxo
+        // de Caixa pra classificar despesa por código do TCM). Usado pra cruzar cada pagamento da
+        // ordem de pagamento (que só tem o número do empenho) com a classificação TCM daquele
+        // empenho no extrato do respectivo fundo.
+        function construirIndiceTcmPorEmpenho() {
+            const mapa = new Map();
+            registrosBrutosExcel.forEach(reg => {
+                if (reg.ano !== ANO_ORDENS_PAGAMENTO || !reg.empenho) return;
+                const chave = `${reg.fundo}|${reg.empenho}`;
+                if (!mapa.has(chave)) mapa.set(chave, reg.tcm || '');
+            });
+            return mapa;
+        }
+
+        function agruparOrdemPagamentoPorTcm(fundo, mesIdx) {
+            const indiceTcm = construirIndiceTcmPorEmpenho();
+            const mapa = new Map();
+            registrosOrdensPagamento
+                .filter(r => r.fundo === fundo && r.mesIdx === mesIdx)
+                .forEach(it => {
+                    const tcm = (indiceTcm.get(`${fundo}|${it.empenho}`) || '').trim() || 'NÃO CLASSIFICADO';
+                    mapa.set(tcm, (mapa.get(tcm) || 0) + it.valor);
+                });
+            return Array.from(mapa.entries()).map(([nome, valor]) => ({ nome, valor })).sort((a, b) => b.valor - a.valor);
+        }
+
+        function agruparOrdemPagamentoPorFornecedor(fundo, mesIdx, tcm) {
+            const indiceTcm = construirIndiceTcmPorEmpenho();
+            const mapa = new Map();
+            registrosOrdensPagamento
+                .filter(r => r.fundo === fundo && r.mesIdx === mesIdx)
+                .filter(r => ((indiceTcm.get(`${fundo}|${r.empenho}`) || '').trim() || 'NÃO CLASSIFICADO') === tcm)
+                .forEach(it => {
+                    const nome = it.fornecedor || 'NÃO IDENTIFICADO';
+                    mapa.set(nome, (mapa.get(nome) || 0) + it.valor);
+                });
+            return Array.from(mapa.entries()).map(([nome, valor]) => ({ nome, valor })).sort((a, b) => b.valor - a.valor);
         }
 
         function linhaMatrizRepasses(label, valores, onClickMes, classeExtra, ehResultado) {
@@ -3524,22 +3569,38 @@
             if (typeof lucide !== 'undefined') lucide.createIcons();
         }
 
-        // Detalhe: pagamentos individuais (fornecedor, nº da OP, empenho, valor) que compõem o
-        // total de "despesas próprias"/"gasto com verba livre" de um fundo num mês.
+        // Detalhe das despesas pagas com verba livre (Executivo ou fundo) num mês: nível 1 agrupa
+        // por código do TCM (igual à aba Fluxo de Caixa); clicar num TCM abre o analítico por
+        // fornecedor (soma por fornecedor dentro daquele TCM). Não desce até cada pagamento
+        // individual — o analítico por fornecedor já é o nível final pedido.
         function abrirDetalheOrdemPagamento(fundo, mesIdx) {
-            const itens = registrosOrdensPagamento
-                .filter(r => r.fundo === fundo && r.mesIdx === mesIdx)
-                .sort((a, b) => b.valor - a.valor);
+            const titulo = fundo === 'EXECUTIVO' ? 'Despesas próprias (verba livre)' : `${fundo} — gasto com verba livre`;
+            const grupos = agruparOrdemPagamentoPorTcm(fundo, mesIdx);
 
-            document.getElementById('painelTitulo').textContent = fundo === 'EXECUTIVO' ? 'Despesas próprias (verba livre)' : `${fundo} — gasto com verba livre`;
+            document.getElementById('painelTitulo').textContent = titulo;
             document.getElementById('painelSubtitulo').textContent = `${MESES_NOMES[mesIdx]} • Fonte 100`;
-            document.getElementById('painelBreadcrumb').innerHTML = '';
-            renderDetalheOrdemPagamentoLista(itens);
+            renderBreadcrumbTopico([{ label: 'Por código TCM' }]);
+            renderLinhasPainel(grupos, it => `abrirDetalheOrdemPagamentoPorFornecedor(${escapeHtml(JSON.stringify(fundo))}, ${mesIdx}, ${escapeHtml(JSON.stringify(it.nome))})`);
             abrirOverlayPainel();
         }
 
+        // Nível 2: dentro do código do TCM escolhido, soma por fornecedor.
+        function abrirDetalheOrdemPagamentoPorFornecedor(fundo, mesIdx, tcm) {
+            const lista = agruparOrdemPagamentoPorFornecedor(fundo, mesIdx, tcm);
+
+            document.getElementById('painelTitulo').textContent = tcm;
+            renderBreadcrumbTopico([
+                { label: 'Por código TCM', onClick: () => abrirDetalheOrdemPagamento(fundo, mesIdx) },
+                { label: tcm }
+            ]);
+            renderListaSimples(lista);
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
+
         // Detalhe: os lançamentos de repasse (extrato do Executivo) que compõem o total enviado a
-        // um fundo específico num mês.
+        // um fundo específico num mês (aqui já é um único fundo, então mantém a lista de
+        // lançamentos — é só o total de "Repasses enviados aos fundos", somando todos os fundos,
+        // que passou a abrir por fundo em vez de cada transferência).
         function abrirDetalheRepasseEnviadoPara(fundo, mesIdx) {
             const itens = registrosBrutosExcel.filter(reg =>
                 reg.fundo === 'EXECUTIVO' && reg.ano === ANO_ORDENS_PAGAMENTO && reg.mesIdx === mesIdx &&
@@ -3552,37 +3613,40 @@
             abrirOverlayPainel();
         }
 
-        // Detalhe: todos os repasses enviados a qualquer fundo num mês (soma da linha "Repasses
-        // enviados aos fundos" da tabela do Executivo).
+        // Detalhe da linha "Repasses enviados aos fundos" do Executivo: abre só o total por fundo
+        // destino (FME, FMS, FMAS...) naquele mês — não desce até cada transferência individual.
         function abrirDetalheRepasseEnviado(mesIdx) {
             const nomesRepasse = nomesRepasseDaEstrutura();
-            const itens = registrosBrutosExcel.filter(reg =>
-                reg.fundo === 'EXECUTIVO' && reg.ano === ANO_ORDENS_PAGAMENTO && reg.mesIdx === mesIdx &&
-                nomesRepasse.some(nome => reg.classificacao === nome || reg.classificacao.includes(nome))
-            );
+            const porFundo = nomesRepasse.map(nome => {
+                const total = registrosBrutosExcel
+                    .filter(reg => reg.fundo === 'EXECUTIVO' && reg.ano === ANO_ORDENS_PAGAMENTO && reg.mesIdx === mesIdx &&
+                        (reg.classificacao === nome || reg.classificacao.includes(nome)))
+                    .reduce((s, reg) => s + reg.saldo, 0);
+                return { nome, valor: total };
+            }).filter(g => Math.abs(g.valor) > 0.004).sort((a, b) => b.valor - a.valor);
+
             document.getElementById('painelTitulo').textContent = 'Repasses enviados aos fundos';
             document.getElementById('painelSubtitulo').textContent = `${MESES_NOMES[mesIdx]} • Fonte 100`;
             document.getElementById('painelBreadcrumb').innerHTML = '';
-            renderDetalheTransacoesExtrato(itens);
+            renderListaSimples(porFundo);
             abrirOverlayPainel();
         }
 
-        function renderDetalheOrdemPagamentoLista(itens) {
+        // Lista simples (nome + valor, sem seta e sem clique) — usada pros níveis finais que não
+        // descem mais fundo: repasses por fundo destino e o analítico por fornecedor.
+        function renderListaSimples(itens) {
             const contentEl = document.getElementById('painelConteudo');
             if (itens.length === 0) {
-                contentEl.innerHTML = '<p class="text-slate-400 text-sm text-center py-10">Nenhum pagamento encontrado neste mês.</p>';
+                contentEl.innerHTML = '<p class="text-slate-400 text-sm text-center py-10">Nenhum lançamento encontrado.</p>';
                 return;
             }
             const total = itens.reduce((s, it) => s + it.valor, 0);
             contentEl.innerHTML = `
-                <p class="text-xs text-slate-400 mb-2">${itens.length} pagamento${itens.length === 1 ? '' : 's'} • total ${formatarValor(total)}</p>
+                <p class="text-xs text-slate-400 mb-2">total ${formatarValor(total)}</p>
             ` + itens.map(it => `
-                <div class="py-2.5 border-b border-slate-100">
-                    <div class="flex items-center justify-between gap-3">
-                        <span class="text-xs font-mono text-slate-400">OP ${escapeHtml(it.codigo || '-')}${it.empenho ? ' • Emp. ' + escapeHtml(it.empenho) : ''}</span>
-                        <span class="text-sm font-semibold text-slate-800 whitespace-nowrap">${formatarValor(it.valor)}</span>
-                    </div>
-                    <p class="text-sm text-slate-600 mt-0.5">${escapeHtml(it.fornecedor || '-')}</p>
+                <div class="flex items-center justify-between gap-3 py-2.5 border-b border-slate-100">
+                    <span class="text-sm text-slate-700">${escapeHtml(it.nome)}</span>
+                    <span class="text-sm font-semibold text-slate-800 whitespace-nowrap">${formatarValor(it.valor)}</span>
                 </div>
             `).join('');
         }
