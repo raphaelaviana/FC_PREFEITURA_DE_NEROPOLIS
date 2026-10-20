@@ -174,6 +174,61 @@
         #listaReceitas table, #listaFornecedores table, #listaFolha table, #listaSaldos table, #listaOutrasFontes table, #listaEmendas table {
             border-collapse: collapse;
         }
+
+        .chat-bolha-usuario {
+            background-color: #1b365d;
+            color: #ffffff;
+            border-radius: 14px 14px 2px 14px;
+            padding: 8px 12px;
+            font-size: 0.8rem;
+            line-height: 1.4;
+            max-width: 85%;
+            margin-left: auto;
+        }
+
+        .chat-bolha-assistente {
+            background-color: #ffffff;
+            color: #1e293b;
+            border: 1px solid #e2e8f0;
+            border-radius: 14px 14px 14px 2px;
+            padding: 8px 12px;
+            font-size: 0.8rem;
+            line-height: 1.4;
+            max-width: 92%;
+        }
+
+        .chat-chip {
+            display: inline-flex;
+            align-items: center;
+            padding: 5px 10px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: #1b365d;
+            background: #eef2f7;
+            border: 1px solid #dbe3ee;
+            border-radius: 999px;
+            cursor: pointer;
+            transition: background-color 0.15s ease;
+        }
+
+        .chat-chip:hover {
+            background: #e2e8f0;
+        }
+
+        .chat-link-detalhe {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            margin-top: 6px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            color: #e65100;
+            cursor: pointer;
+        }
+
+        .chat-link-detalhe:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body class="min-h-screen flex flex-col bg-white">
@@ -486,6 +541,35 @@
         </div>
 
     </main>
+
+    <!-- Assistente de Perguntas (chat baseado em regras, sem IA externa) -->
+    <button id="chatFabBtn" onclick="toggleChatAssistente()" type="button"
+        class="fixed bottom-5 right-5 z-30 bg-[#e65100] hover:bg-[#d04800] text-white rounded-full w-14 h-14 shadow-xl flex items-center justify-center transition"
+        title="Pergunte ao painel">
+        <i data-lucide="message-circle" class="w-6 h-6"></i>
+    </button>
+
+    <div id="chatAssistentePanel" class="hidden fixed bottom-24 right-5 z-30 w-[380px] max-w-[92vw] h-[540px] max-h-[75vh] bg-white rounded-xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden">
+        <div class="bg-[#1b365d] text-white px-4 py-3 border-b-4 border-[#e65100] shrink-0 flex items-start justify-between gap-2">
+            <div class="min-w-0">
+                <h2 class="text-sm font-bold leading-tight">Pergunte ao painel</h2>
+                <p class="text-xs text-blue-200 mt-0.5">Pergunte em linguagem simples sobre receitas, despesas e repasses</p>
+            </div>
+            <button onclick="toggleChatAssistente()" class="text-blue-200 hover:text-white transition shrink-0" title="Fechar">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+        </div>
+        <div id="chatMensagens" class="flex-1 overflow-y-auto p-3 space-y-3 bg-slate-50"></div>
+        <div id="chatSugestoes" class="px-3 pb-2 flex flex-wrap gap-1.5"></div>
+        <div class="p-3 border-t border-slate-200 flex items-center gap-2 shrink-0">
+            <input id="chatInputPergunta" type="text" placeholder="Ex.: quanto entrou de IPTU em agosto?"
+                class="flex-1 min-w-0 border border-slate-300 rounded-full px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#e65100]/40"
+                onkeydown="if(event.key==='Enter'){enviarPerguntaChat();}">
+            <button onclick="enviarPerguntaChat()" class="shrink-0 bg-[#1b365d] hover:bg-[#142847] text-white rounded-full w-9 h-9 flex items-center justify-center transition" title="Enviar">
+                <i data-lucide="send" class="w-4 h-4"></i>
+            </button>
+        </div>
+    </div>
 
     <!-- Overlay do Painel Lateral -->
     <div id="painelOverlay" class="hidden fixed inset-0 bg-slate-900/50 z-40 transition-opacity duration-300" onclick="fecharPainel()"></div>
@@ -3683,6 +3767,398 @@
                     <p class="text-sm text-slate-600 mt-0.5">${escapeHtml(it.descricao || '-')}</p>
                 </div>
             `).join('');
+        }
+
+        /* ==================== ASSISTENTE DE PERGUNTAS (chat baseado em regras) ====================
+           Pedido da Daniella: o prefeito poder perguntar em linguagem simples ("quanto entrou de
+           IPTU em agosto?", "quanto a Saúde gastou com remédio esse mês?") sem precisar abrir
+           tabela nenhuma. Não usa IA externa de propósito — o painel é um arquivo HTML estático,
+           sem servidor por trás, então uma chave de API embutida aqui ficaria visível pra
+           qualquer um que abrisse o código-fonte do arquivo. Em vez disso, reconhece mês/ano/
+           fundo/categoria por palavra-chave e reaproveita as MESMAS funções de agregação já usadas
+           nas outras abas (Fluxo de Caixa, Gastos por Tópico, Repasses) — garante que a resposta
+           do chat sempre bate com o que aparece nas tabelas, e roda inteiramente no navegador,
+           sem custo por pergunta. */
+
+        let chatHistorico = [];
+        let chatAberto = false;
+
+        const MESES_ABREV_CHAT = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
+
+        const FUNDOS_CHAT = [
+            { fundo: 'EXECUTIVO', palavras: ['EXECUTIVO', 'PREFEITURA'] },
+            { fundo: 'FMS', palavras: ['FMS', 'SAUDE'] },
+            { fundo: 'FMAS', palavras: ['FMAS', 'ASSISTENCIA SOCIAL'] },
+            { fundo: 'FME', palavras: ['FME', 'EDUCACAO'] },
+            { fundo: 'FMMA', palavras: ['FMMA', 'MEIO AMBIENTE'] },
+            { fundo: 'FMDPI', palavras: ['FMDPI'] },
+            { fundo: 'FUNREBOM', palavras: ['FUNREBOM', 'BOMBEIRO', 'CORPO DE BOMBEIROS'] },
+            { fundo: 'FMDCA', palavras: ['FMDCA'] },
+            { fundo: 'CAMARA', palavras: ['CAMARA'] },
+            { fundo: 'FUNDEB', palavras: ['FUNDEB'] },
+            { fundo: 'IMPANER', palavras: ['IMPANER'] }
+        ];
+
+        const CATEGORIAS_FLUXO_CHAT = [
+            { descricao: 'FOPAG', palavras: ['FOPAG', 'FOLHA DE PAGAMENTO', 'SALARIO', 'SALARIOS'] },
+            { descricao: 'CUSTEIO', palavras: ['CUSTEIO'] },
+            { descricao: 'CAPEX', palavras: ['CAPEX', 'INVESTIMENTO'] },
+            { descricao: 'PROJETOS', palavras: ['PROJETO', 'PROJETOS'] },
+            { descricao: 'VEÍCULOS', palavras: ['VEICULO', 'VEICULOS', 'CARRO', 'CARROS', 'CAMINHAO'] },
+            { descricao: 'DÍVIDAS', palavras: ['DIVIDA', 'DIVIDAS', 'EMPRESTIMO'] },
+            { descricao: 'DESPESAS FINANCEIRAS', palavras: ['DESPESA FINANCEIRA', 'DESPESAS FINANCEIRAS', 'JUROS', 'TARIFA BANCARIA'] },
+            { descricao: 'DESPESAS TRIBUTÁRIAS', palavras: ['DESPESA TRIBUTARIA', 'DESPESAS TRIBUTARIAS'] },
+            { descricao: 'INDENIZAÇÕES', palavras: ['INDENIZACAO', 'INDENIZACOES'] },
+            { descricao: 'INSTALAÇÕES', palavras: ['INSTALACAO', 'INSTALACOES'] },
+            { descricao: 'PENSÕES E APOSENTADORIA', palavras: ['PENSAO', 'PENSOES', 'APOSENTADORIA'] },
+            { descricao: 'ASSESSORIA', palavras: ['ASSESSORIA'] },
+            { descricao: 'ESTORNOS', palavras: ['ESTORNO', 'ESTORNOS'] },
+            { descricao: 'RECEITA DE REPASSE', palavras: ['RECEITA DE REPASSE', 'TRANSFERENCIA RECEBIDA'] }
+        ];
+
+        const PALAVRAS_RECEITA_LIVRE = ['IPTU', 'ITBI', 'ISS', 'ICMS', 'IPVA', 'ITR', 'FPM', 'ROYALT', 'ALUGUEL', 'ALUGUEIS', 'MULTA', 'MULTAS', 'TAXA', 'TAXAS', 'CONVENIO', 'CONVENIOS'];
+        const LABEL_RECEITA_LIVRE = { ROYALT: 'royalties', ALUGUEL: 'aluguéis', ALUGUEIS: 'aluguéis', MULTA: 'multas', MULTAS: 'multas', TAXA: 'taxas', TAXAS: 'taxas', CONVENIO: 'convênios', CONVENIOS: 'convênios' };
+
+        const PALAVRAS_INTENCAO_DESPESA = ['GASTOU', 'GASTO', 'GASTOS', 'PAGOU', 'PAGAMENTO', 'DESPESA', 'DESPESAS', 'SAIU', 'CUSTOU', 'CUSTO'];
+        const PALAVRAS_INTENCAO_RECEITA = ['ENTROU', 'ENTRADA', 'RECEBEU', 'RECEBIMENTO', 'ARRECADOU', 'ARRECADACAO', 'RECEITA', 'RECEITAS'];
+        const PALAVRAS_INTENCAO_SALDO = ['SALDO', 'DEFICIT', 'SUPERAVIT', 'RESULTADO', 'SOBROU', 'FALTOU'];
+        const PALAVRAS_INTENCAO_REPASSE = ['REPASSE', 'REPASSES', 'REPASSOU', 'MANDOU', 'ENVIOU', 'TRANSFERIU', 'TRANSFERENCIA'];
+
+        // Inclui também as próprias palavras de intenção (GASTOU, ENTROU, SALDO...) — senão elas
+        // vazavam pro filtro de "local" (ex.: "obras" + "gastou" virava um segundo termo de busca
+        // "gastou", que nunca aparece no histórico do empenho, e a resposta dava falso negativo).
+        const PALAVRAS_PARAR_CHAT = new Set(['DE', 'DO', 'DA', 'DOS', 'DAS', 'EM', 'NO', 'NA', 'NOS', 'NAS', 'PARA', 'PRA', 'PELO', 'PELA', 'O', 'A', 'OS', 'AS', 'UM', 'UMA', 'QUANTO', 'QUANTOS', 'QUAL', 'QUE', 'COM', 'ESSE', 'ESSA', 'ESSES', 'ESSAS', 'ESTE', 'ESTA', 'ESTES', 'ESTAS', 'MES', 'ANO', 'FOI', 'FORAM', 'TEM', 'TEVE', 'AO', 'E', 'OU', 'SE',
+            'GASTOU', 'GASTO', 'GASTOS', 'PAGOU', 'PAGAMENTO', 'DESPESA', 'DESPESAS', 'SAIU', 'CUSTOU', 'CUSTO',
+            'ENTROU', 'ENTRADA', 'RECEBEU', 'RECEBIMENTO', 'ARRECADOU', 'ARRECADACAO', 'RECEITA', 'RECEITAS',
+            'SALDO', 'DEFICIT', 'SUPERAVIT', 'RESULTADO', 'SOBROU', 'FALTOU',
+            'REPASSE', 'REPASSES', 'REPASSOU', 'MANDOU', 'ENVIOU', 'TRANSFERIU', 'TRANSFERENCIA']);
+
+        // Tira acento/maiúsculas (normalizarTexto) e também pontuação (?, ., etc.) — sem isso um
+        // token como "agosto?" não bate como substring exata em comparações posteriores.
+        function chatNormalizarPergunta(perguntaBruta) {
+            return normalizarTexto(perguntaBruta).replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+        }
+
+        function chatMesAtualReferencia() {
+            return mesMaisRecenteNoAnoSelecionado(registrosBrutosExcel);
+        }
+
+        function chatDetectarMes(texto) {
+            if (texto.includes('MES PASSADO') || texto.includes('MES ANTERIOR')) {
+                const atual = chatMesAtualReferencia();
+                return atual > 0 ? atual - 1 : 11;
+            }
+            if (texto.includes('ESSE MES') || texto.includes('ESTE MES') || texto.includes('MES ATUAL') || texto.includes('MES CORRENTE')) {
+                return chatMesAtualReferencia();
+            }
+            for (let i = 0; i < MESES_ABREV_CHAT.length; i++) {
+                if (texto.includes(MESES_ABREV_CHAT[i])) return i;
+            }
+            return null;
+        }
+
+        function chatDetectarAno(texto) {
+            const m = texto.match(/\b(20\d{2})\b/);
+            if (m) return m[1];
+            const selAno = document.getElementById('selectAno').value.toUpperCase();
+            return anoMaisRecenteDosRegistros(registrosBrutosExcel, selAno);
+        }
+
+        function chatDetectarFundo(texto) {
+            for (const item of FUNDOS_CHAT) {
+                if (item.palavras.some(p => texto.includes(p))) return item.fundo;
+            }
+            const selFundo = document.getElementById('selectFundo').value.toUpperCase();
+            return selFundo === 'TODOS' ? 'EXECUTIVO' : selFundo;
+        }
+
+        // Pega o que sobra da pergunta depois de remover mês/ano/fundo/categoria já reconhecidos
+        // — usado como filtro extra de local/assunto (ex.: "obras na Rua das Flores" também filtra
+        // pelas palavras "RUA"/"FLORES" dentro do histórico do empenho). Devolve um array de
+        // palavras soltas (não uma frase) de propósito: no texto real do histórico, o nome do
+        // lugar quase sempre tem uma preposição no meio ("RUA DAS FLORES"), e essa preposição
+        // já foi removida da pergunta como palavra de parada — exigir a frase inteira como um
+        // substring contíguo nunca bateria com o histórico original.
+        function chatExtrairLocal(texto, termosConhecidos) {
+            let limpo = texto;
+            (termosConhecidos || []).forEach(t => { if (t) limpo = limpo.split(t).join(' '); });
+            return limpo.split(' ').filter(p => p.length >= 4 && !PALAVRAS_PARAR_CHAT.has(p) && !/^20\d{2}$/.test(p));
+        }
+
+        function chatFormatarMesAno(mesIdx, ano) {
+            if (mesIdx === null) return `o ano de ${ano}`;
+            const nome = MESES_NOMES[mesIdx];
+            return `${nome.charAt(0)}${nome.slice(1).toLowerCase()} de ${ano}`;
+        }
+
+        function chatItensRegistros(filtro) {
+            return registrosBrutosExcel.filter(filtro).sort((a, b) => (a.dataOrd || 0) - (b.dataOrd || 0));
+        }
+
+        // ---- Tópicos de gasto (obras, saúde, educação...) — mesma classificação da aba "Gastos
+        // por Tópico" (classificarTopicoEmpenho), só que aqui também filtrada por mês/fundo. ----
+        function chatHandlerTopico(texto, ctx) {
+            const sinonimosTopico = {
+                obras: ['OBRA', 'OBRAS', 'INFRAESTRUTURA', 'PAVIMENTACAO', 'ASFALTO'],
+                saude: ['SAUDE', 'HOSPITAL', 'REMEDIO', 'REMEDIOS', 'MEDICAMENTO', 'MEDICAMENTOS', 'CIRURGIA'],
+                educacao: ['EDUCACAO', 'ESCOLA', 'ESCOLAR', 'MERENDA', 'CRECHE'],
+                assistencia: ['ASSISTENCIA SOCIAL', 'ASSISTENCIA'],
+                frota: ['FROTA', 'COMBUSTIVEL', 'VEICULO', 'VEICULOS', 'CARRO', 'CARROS', 'ONIBUS', 'CAMINHAO'],
+                festividades: ['FESTA', 'FESTIVIDADE', 'FESTIVIDADES', 'EVENTO', 'EVENTOS'],
+                iluminacao: ['ILUMINACAO']
+            };
+            let chaveEncontrada = null, palavraUsada = '';
+            for (const chave of Object.keys(sinonimosTopico)) {
+                const achou = sinonimosTopico[chave].find(p => texto.includes(p));
+                if (achou) { chaveEncontrada = chave; palavraUsada = achou; break; }
+            }
+            if (!chaveEncontrada) return null;
+            if (!PALAVRAS_INTENCAO_DESPESA.some(p => texto.includes(p)) && !texto.includes('QUANTO')) return null;
+            if (registrosHistoricoEmpenhos.length === 0) return null;
+
+            const meta = TOPICOS_GASTO.find(t => t.chave === chaveEncontrada);
+            const localExtra = chatExtrairLocal(texto, [palavraUsada].concat(ctx.termosConhecidos));
+            const localTexto = localExtra.join(' ');
+
+            const itens = [];
+            registrosBrutosExcel.forEach(r => {
+                if (!(r.saldo < 0 && r.empenho)) return;
+                if (r.ano !== ctx.ano) return;
+                if (ctx.mesIdx !== null && r.mesIdx !== ctx.mesIdx) return;
+                if (!fundoCorresponde(r.fundo, ctx.fundo)) return;
+                const hist = mapaHistoricoPorEmpenho.get(r.empenho);
+                const chave = hist ? (classificarTopicoEmpenho(hist) || 'naoClassificado') : 'semHistorico';
+                if (chave !== chaveEncontrada) return;
+                if (localExtra.length > 0 && !(hist && localExtra.every(p => hist.historicoNorm.includes(p)))) return;
+                itens.push(r);
+            });
+            itens.sort((a, b) => (a.dataOrd || 0) - (b.dataOrd || 0));
+
+            const total = itens.reduce((s, r) => s + Math.abs(r.saldo), 0);
+            const periodoTexto = chatFormatarMesAno(ctx.mesIdx, ctx.ano);
+            const nomeFundo = ctx.fundo === 'EXECUTIVO' ? 'o Executivo' : ctx.fundo;
+            let textoResposta;
+            if (itens.length === 0) {
+                textoResposta = localTexto
+                    ? `Não encontrei gasto de ${meta.nome} com "${localTexto.toLowerCase()}" em ${periodoTexto} (${ctx.fundo}).`
+                    : `Não encontrei gasto de ${meta.nome} em ${periodoTexto} (${ctx.fundo}).`;
+            } else {
+                textoResposta = `Em ${periodoTexto}, ${nomeFundo} gastou <strong>${formatarValor(total)}</strong> com ${meta.nome}${localTexto ? ` relacionado a "${localTexto.toLowerCase()}"` : ''} (${itens.length} empenho${itens.length === 1 ? '' : 's'}).`;
+            }
+            return { texto: textoResposta, itens, titulo: meta.nome, subtitulo: `${ctx.fundo} • ${periodoTexto}` };
+        }
+
+        // ---- Repasses do Executivo pros fundos (mesmos dados da aba Repasses). ----
+        function chatHandlerRepasse(texto, ctx) {
+            if (!PALAVRAS_INTENCAO_REPASSE.some(p => texto.includes(p))) return null;
+            const fundoAlvo = FUNDOS_REPASSE.find(f => ctx.fundo === f || texto.includes(f));
+            if (!fundoAlvo) return null;
+            if (ctx.ano !== ANO_ORDENS_PAGAMENTO) {
+                return { texto: `A aba de Repasses só tem dados a partir de ${ANO_ORDENS_PAGAMENTO}.`, itens: [], titulo: '', subtitulo: '' };
+            }
+
+            const itens = registrosBrutosExcel
+                .filter(reg => reg.fundo === 'EXECUTIVO' && reg.ano === ANO_ORDENS_PAGAMENTO &&
+                    (ctx.mesIdx === null || reg.mesIdx === ctx.mesIdx) &&
+                    (reg.classificacao === fundoAlvo || reg.classificacao.includes(fundoAlvo)))
+                .map(reg => ({ ...reg, saldo: -reg.saldo }))
+                .sort((a, b) => (a.dataOrd || 0) - (b.dataOrd || 0));
+
+            const total = itens.reduce((s, it) => s + it.saldo, 0);
+            const periodoTexto = chatFormatarMesAno(ctx.mesIdx, ctx.ano);
+            const textoResposta = total > 0.004
+                ? `O Executivo repassou <strong>${formatarValor(total)}</strong> pro ${fundoAlvo} em ${periodoTexto}.`
+                : `Não encontrei repasse do Executivo pro ${fundoAlvo} em ${periodoTexto}.`;
+            return { texto: textoResposta, itens, titulo: `Repasse enviado — ${fundoAlvo}`, subtitulo: periodoTexto };
+        }
+
+        // ---- Categorias do Fluxo de Caixa (FOPAG, custeio, dívidas...) — reaproveita
+        // registrosParaFilho, a mesma função usada no drill-down daquela aba. ----
+        function chatHandlerCategoriaFluxo(texto, ctx) {
+            const achou = CATEGORIAS_FLUXO_CHAT.find(c => c.palavras.some(p => texto.includes(p)));
+            if (!achou) return null;
+
+            const registros = registrosParaFilho('', achou.descricao, ctx.fundo, ctx.ano, ctx.mesIdx === null ? 'TOTAL' : ctx.mesIdx);
+            const total = registros.reduce((s, r) => s + r.saldo, 0);
+            const periodoTexto = chatFormatarMesAno(ctx.mesIdx, ctx.ano);
+            const nomeFundo = ctx.fundo === 'EXECUTIVO' ? 'o Executivo' : ctx.fundo;
+            const ehDespesa = total < 0 || PALAVRAS_INTENCAO_DESPESA.some(p => texto.includes(p));
+
+            let textoResposta;
+            if (registros.length === 0) {
+                textoResposta = `Não encontrei lançamentos de ${achou.descricao.toLowerCase()} em ${periodoTexto} (${ctx.fundo}).`;
+            } else {
+                textoResposta = `Em ${periodoTexto}, ${nomeFundo} ${ehDespesa ? 'gastou' : 'recebeu'} <strong>${formatarValor(Math.abs(total))}</strong> em ${achou.descricao.toLowerCase()}.`;
+            }
+            return { texto: textoResposta, itens: registros, titulo: achou.descricao, subtitulo: `${ctx.fundo} • ${periodoTexto}` };
+        }
+
+        // ---- Receita por palavra-chave (IPTU, ISS, ICMS, FPM...) — esses impostos não viram uma
+        // categoria própria no Fluxo de Caixa, então busca direto no texto do lançamento. ----
+        function chatHandlerReceitaPalavraChave(texto, ctx) {
+            const palavra = PALAVRAS_RECEITA_LIVRE.find(p => texto.includes(p));
+            if (!palavra) return null;
+
+            const filtro = r => r.saldo > 0 && r.ano === ctx.ano &&
+                (ctx.mesIdx === null || r.mesIdx === ctx.mesIdx) &&
+                fundoCorresponde(r.fundo, ctx.fundo) &&
+                (normalizarTexto(r.descricao).includes(palavra) || normalizarTexto(r.segReceita).includes(palavra) || normalizarTexto(r.classificacao).includes(palavra));
+
+            const itens = chatItensRegistros(filtro);
+            const total = itens.reduce((s, r) => s + r.saldo, 0);
+            const periodoTexto = chatFormatarMesAno(ctx.mesIdx, ctx.ano);
+            const rotulo = LABEL_RECEITA_LIVRE[palavra] || palavra;
+            const textoResposta = itens.length === 0
+                ? `Não encontrei receita de ${rotulo} em ${periodoTexto} (${ctx.fundo}).`
+                : `Em ${periodoTexto}, entrou <strong>${formatarValor(total)}</strong> de receita de ${rotulo} (${ctx.fundo}).`;
+            return { texto: textoResposta, itens, titulo: `Receita — ${rotulo}`, subtitulo: `${ctx.fundo} • ${periodoTexto}` };
+        }
+
+        // ---- Saldo do período (receitas − despesas), mesma soma que resulta na linha
+        // SUPERÁVIT/DÉFICIT do Fluxo de Caixa. ----
+        function chatHandlerSaldo(texto, ctx) {
+            if (!PALAVRAS_INTENCAO_SALDO.some(p => texto.includes(p))) return null;
+
+            const filtro = r => r.ano === ctx.ano &&
+                (ctx.mesIdx === null || r.mesIdx === ctx.mesIdx) &&
+                fundoCorresponde(r.fundo, ctx.fundo);
+
+            const itens = chatItensRegistros(filtro);
+            const total = itens.reduce((s, r) => s + r.saldo, 0);
+            const periodoTexto = chatFormatarMesAno(ctx.mesIdx, ctx.ano);
+            const nomeFundo = ctx.fundo === 'EXECUTIVO' ? 'o Executivo' : ctx.fundo;
+            const situacao = total >= 0 ? 'superávit' : 'déficit';
+            const textoResposta = `Em ${periodoTexto}, ${nomeFundo} fechou com <strong>${situacao} de ${formatarValor(Math.abs(total))}</strong> (receitas menos despesas).`;
+            return { texto: textoResposta, itens, titulo: 'Saldo do período', subtitulo: `${ctx.fundo} • ${periodoTexto}` };
+        }
+
+        // ---- Último recurso: busca livre pelo texto do lançamento, pra perguntas que mencionam
+        // um assunto que não é nenhuma categoria/tópico conhecido (ex.: um fornecedor específico). ----
+        function chatHandlerLivre(texto, ctx) {
+            const ehDespesa = PALAVRAS_INTENCAO_DESPESA.some(p => texto.includes(p));
+            const ehReceita = PALAVRAS_INTENCAO_RECEITA.some(p => texto.includes(p));
+            if (!ehDespesa && !ehReceita) return null;
+
+            const todasPalavrasFundo = FUNDOS_CHAT.reduce((arr, f) => arr.concat(f.palavras), []);
+            const palavras = texto.split(' ').filter(p =>
+                p.length >= 4 && !PALAVRAS_PARAR_CHAT.has(p) &&
+                !MESES_ABREV_CHAT.some(m => p.includes(m)) && !/^20\d{2}$/.test(p) &&
+                !PALAVRAS_INTENCAO_DESPESA.includes(p) && !PALAVRAS_INTENCAO_RECEITA.includes(p) &&
+                !todasPalavrasFundo.includes(p));
+            if (palavras.length === 0) return null;
+            const alvo = palavras.sort((a, b) => b.length - a.length)[0];
+
+            const filtro = r => (ehDespesa ? r.saldo < 0 : r.saldo > 0) && r.ano === ctx.ano &&
+                (ctx.mesIdx === null || r.mesIdx === ctx.mesIdx) &&
+                fundoCorresponde(r.fundo, ctx.fundo) &&
+                (normalizarTexto(r.descricao).includes(alvo) || normalizarTexto(r.classificacao).includes(alvo) || normalizarTexto(r.tcm).includes(alvo));
+
+            const itens = chatItensRegistros(filtro);
+            if (itens.length === 0) return null;
+            const total = itens.reduce((s, r) => s + Math.abs(r.saldo), 0);
+            const periodoTexto = chatFormatarMesAno(ctx.mesIdx, ctx.ano);
+            const textoResposta = `Em ${periodoTexto}, encontrei <strong>${formatarValor(total)}</strong> relacionado a "${alvo.toLowerCase()}" (${ctx.fundo}) — não é uma categoria exata do painel, é uma busca pelo texto dos lançamentos.`;
+            return { texto: textoResposta, itens, titulo: `Busca: ${alvo}`, subtitulo: `${ctx.fundo} • ${periodoTexto}` };
+        }
+
+        const CHAT_HANDLERS = [chatHandlerTopico, chatHandlerRepasse, chatHandlerCategoriaFluxo, chatHandlerReceitaPalavraChave, chatHandlerSaldo, chatHandlerLivre];
+
+        function responderPergunta(perguntaBruta) {
+            if (registrosBrutosExcel.length === 0) {
+                return { texto: 'Os dados ainda estão carregando — espera só um instante e pergunta de novo.', itens: [], titulo: '', subtitulo: '' };
+            }
+            const texto = chatNormalizarPergunta(perguntaBruta);
+            const mesIdx = chatDetectarMes(texto);
+            const ano = chatDetectarAno(texto);
+            const fundo = chatDetectarFundo(texto);
+            const termosConhecidos = [String(ano)];
+            if (mesIdx !== null) termosConhecidos.push(MESES_ABREV_CHAT[mesIdx]);
+            const fundoInfo = FUNDOS_CHAT.find(f => f.fundo === fundo);
+            if (fundoInfo) termosConhecidos.push(...fundoInfo.palavras);
+            const ctx = { mesIdx, ano, fundo, termosConhecidos };
+
+            for (const handler of CHAT_HANDLERS) {
+                const resultado = handler(texto, ctx);
+                if (resultado) return resultado;
+            }
+
+            return {
+                texto: 'Não consegui entender essa pergunta ainda. Posso responder sobre: receitas (ex.: "quanto entrou de IPTU em agosto"), gastos por tema (obras, saúde, educação, assistência social, frota, festividades), repasses do Executivo pros fundos, categorias do Fluxo de Caixa (FOPAG, custeio, dívidas...) e saldo do período (déficit/superávit). Pode indicar o mês e, se quiser, o fundo (FMS, FMAS, FME...).',
+                itens: [], titulo: '', subtitulo: ''
+            };
+        }
+
+        function toggleChatAssistente() {
+            const painel = document.getElementById('chatAssistentePanel');
+            chatAberto = !chatAberto;
+            painel.classList.toggle('hidden', !chatAberto);
+            if (chatAberto && chatHistorico.length === 0) {
+                adicionarMensagemChat('assistente', 'Oi! Pergunte sobre receitas, despesas, repasses ou saldo — por exemplo, "quanto entrou de IPTU em agosto?" ou "quanto a Saúde gastou com remédio esse mês?".');
+                renderSugestoesChat();
+            }
+            if (chatAberto) {
+                const input = document.getElementById('chatInputPergunta');
+                if (input) input.focus();
+            }
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
+
+        function renderSugestoesChat() {
+            const el = document.getElementById('chatSugestoes');
+            if (!el) return;
+            const exemplos = [
+                'Quanto entrou de receita este mês?',
+                'Quanto a Saúde gastou com remédio esse mês?',
+                'Quanto o Executivo repassou pro FMS?',
+                'Qual o saldo do mês?'
+            ];
+            el.innerHTML = exemplos.map(ex => `<button type="button" class="chat-chip" onclick="chatPerguntarSugestao(${escapeHtml(JSON.stringify(ex))})">${escapeHtml(ex)}</button>`).join('');
+        }
+
+        function chatPerguntarSugestao(texto) {
+            const input = document.getElementById('chatInputPergunta');
+            input.value = texto;
+            enviarPerguntaChat();
+        }
+
+        function enviarPerguntaChat() {
+            const input = document.getElementById('chatInputPergunta');
+            const pergunta = input.value.trim();
+            if (!pergunta) return;
+            input.value = '';
+            adicionarMensagemChat('usuario', escapeHtml(pergunta));
+            const resposta = responderPergunta(pergunta);
+            adicionarMensagemChat('assistente', resposta.texto, resposta);
+        }
+
+        function adicionarMensagemChat(autor, textoHtml, resposta) {
+            chatHistorico.push({ autor, textoHtml, resposta });
+            const container = document.getElementById('chatMensagens');
+            if (!container) return;
+            const bolha = document.createElement('div');
+            bolha.className = autor === 'usuario' ? 'chat-bolha-usuario' : 'chat-bolha-assistente';
+            bolha.innerHTML = textoHtml;
+            if (resposta && resposta.itens && resposta.itens.length > 0) {
+                const link = document.createElement('div');
+                link.className = 'chat-link-detalhe';
+                link.innerHTML = `<i data-lucide="list" class="w-3.5 h-3.5"></i> Ver ${resposta.itens.length} lançamento${resposta.itens.length === 1 ? '' : 's'}`;
+                link.onclick = () => abrirDetalheChat(resposta.itens, resposta.titulo, resposta.subtitulo);
+                bolha.appendChild(link);
+            }
+            const linha = document.createElement('div');
+            linha.className = 'flex';
+            linha.appendChild(bolha);
+            container.appendChild(linha);
+            container.scrollTop = container.scrollHeight;
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
+
+        function abrirDetalheChat(itens, titulo, subtitulo) {
+            document.getElementById('painelTitulo').textContent = titulo || 'Detalhamento';
+            document.getElementById('painelSubtitulo').textContent = subtitulo || '';
+            document.getElementById('painelBreadcrumb').innerHTML = '';
+            renderDetalheTransacoesExtrato(itens);
+            abrirOverlayPainel();
         }
 
         recalcularEFiltrar();
