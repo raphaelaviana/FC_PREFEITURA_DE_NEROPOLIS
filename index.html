@@ -3816,7 +3816,7 @@
             { descricao: 'RECEITA DE REPASSE', palavras: ['RECEITA DE REPASSE', 'TRANSFERENCIA RECEBIDA'] }
         ];
 
-        const PALAVRAS_RECEITA_LIVRE = ['IPTU', 'ITBI', 'ISS', 'ICMS', 'IPVA', 'ITR', 'FPM', 'ROYALT', 'ALUGUEL', 'ALUGUEIS', 'MULTA', 'MULTAS', 'TAXA', 'TAXAS', 'CONVENIO', 'CONVENIOS'];
+        const PALAVRAS_RECEITA_LIVRE = ['IPTU', 'ITBI', 'ISS', 'ICMS', 'IPVA', 'ITR', 'FPM', 'QSE', 'ROYALT', 'ALUGUEL', 'ALUGUEIS', 'MULTA', 'MULTAS', 'TAXA', 'TAXAS', 'CONVENIO', 'CONVENIOS'];
         const LABEL_RECEITA_LIVRE = { ROYALT: 'royalties', ALUGUEL: 'aluguéis', ALUGUEIS: 'aluguéis', MULTA: 'multas', MULTAS: 'multas', TAXA: 'taxas', TAXAS: 'taxas', CONVENIO: 'convênios', CONVENIOS: 'convênios' };
 
         const PALAVRAS_INTENCAO_DESPESA = ['GASTOU', 'GASTO', 'GASTOS', 'PAGOU', 'PAGAMENTO', 'DESPESA', 'DESPESAS', 'SAIU', 'CUSTOU', 'CUSTO'];
@@ -3831,7 +3831,7 @@
             'GASTOU', 'GASTO', 'GASTOS', 'PAGOU', 'PAGAMENTO', 'DESPESA', 'DESPESAS', 'SAIU', 'CUSTOU', 'CUSTO',
             'ENTROU', 'ENTRADA', 'RECEBEU', 'RECEBIMENTO', 'ARRECADOU', 'ARRECADACAO', 'RECEITA', 'RECEITAS',
             'SALDO', 'DEFICIT', 'SUPERAVIT', 'RESULTADO', 'SOBROU', 'FALTOU',
-            'REPASSE', 'REPASSES', 'REPASSOU', 'MANDOU', 'ENVIOU', 'TRANSFERIU', 'TRANSFERENCIA']);
+            'REPASSE', 'REPASSES', 'REPASSOU', 'MANDOU', 'ENVIOU', 'TRANSFERIU', 'TRANSFERENCIA', 'FONTE', 'FONTES']);
 
         // Tira acento/maiúsculas (normalizarTexto) e também pontuação (?, ., etc.) — sem isso um
         // token como "agosto?" não bate como substring exata em comparações posteriores.
@@ -4061,7 +4061,116 @@
             return { texto: textoResposta, itens, titulo: `Busca: ${alvo}`, subtitulo: `${ctx.fundo} • ${periodoTexto}` };
         }
 
-        const CHAT_HANDLERS = [chatHandlerTopico, chatHandlerRepasse, chatHandlerCategoriaFluxo, chatHandlerReceitaPalavraChave, chatHandlerSaldo, chatHandlerLivre];
+        // ---- Guarda de escopo: roda ANTES de qualquer outro handler. Pergunta pedindo comparação
+        // entre dois períodos (ex.: "até agosto de 2026 x mesmo período de 2025") ou um acumulado
+        // parcial do ano (ex.: "até agosto") são coisas que o motor ainda não calcula — ele só soma
+        // um mês específico ou o ano inteiro de uma vez. Sem essa guarda, uma pergunta dessas cairia
+        // no handler de palavra-chave (ex.: FPM) e devolveria só o valor de UM mês como se fosse a
+        // resposta certa pra comparação toda — um número que parece certo mas está errado é pior do
+        // que admitir a limitação.
+        function chatHandlerForaDeEscopo(texto, ctx) {
+            const indicaComparacao = ['VARIACAO', 'DIFERENCA', 'COMPARA', 'COMPARACAO', 'COMPARADO', 'EM RELACAO',
+                'ANO PASSADO', 'ANO ANTERIOR', 'PERIODO ANTERIOR', 'MESMO PERIODO', 'CRESCEU', 'CRESCIMENTO',
+                'AUMENTOU', 'DIMINUIU', 'QUEDA', 'A MAIS QUE', 'A MENOS QUE'].some(p => texto.includes(p));
+            const indicaAcumuladoParcial = /\bATE\s+(JAN|FEV|MAR|ABR|MAI|JUN|JUL|AGO|SET|OUT|NOV|DEZ)/.test(texto) || texto.includes('ACUMULADO');
+
+            if (!indicaComparacao && !indicaAcumuladoParcial) return null;
+
+            const textoResposta = indicaComparacao
+                ? 'Ainda não sei comparar dois períodos numa pergunta só (tipo "esse ano até agosto" vs "o mesmo período do ano passado"). Por enquanto, pergunta um mês (ou o ano todo) de cada vez — ex.: "quanto entrou de FPM em agosto de 2026" e depois "quanto entrou de FPM em agosto de 2025" — aí dá pra comparar os dois números.'
+                : 'Ainda não calculo o acumulado de vários meses juntos (tipo "até agosto"). Por enquanto, só respondo um mês específico ou o ano inteiro — pergunta assim: "quanto entrou de FPM em agosto de 2026" (um mês) ou "quanto entrou de FPM em 2026" (ano inteiro).';
+            return { texto: textoResposta, itens: [], titulo: '', subtitulo: '' };
+        }
+
+        // ---- Procura, na legenda de fontes vinculadas já confirmada pela Prefeitura
+        // (LEGENDA_FONTES_POR_FUNDO — a mesma usada na aba Saldo em Conta), uma fonte cujo nome
+        // bata com alguma palavra da pergunta (ex.: "QSE" dentro de "QSE — Quota Salário
+        // Educação"). Prefere o match mais curto/específico (normalmente a sigla, tipo "QSE" ou
+        // "PNAE") a uma palavra genérica do nome completo (tipo "educação"), que é menos exata.
+        function chatEncontrarFonte(texto) {
+            const candidatos = [];
+            Object.keys(LEGENDA_FONTES_POR_FUNDO).forEach(fundo => {
+                const porChave = LEGENDA_FONTES_POR_FUNDO[fundo];
+                Object.keys(porChave).forEach(chave => {
+                    const nome = porChave[chave];
+                    normalizarTexto(nome).split(/[^A-Z0-9]+/).filter(p => p.length >= 3).forEach(palavra => {
+                        if (texto.includes(palavra)) candidatos.push({ fundo, chave, nome, palavra });
+                    });
+                });
+            });
+            if (candidatos.length === 0) return null;
+            candidatos.sort((a, b) => a.palavra.length - b.palavra.length);
+            const melhor = candidatos[0];
+            // Pode haver mais de um código de fonte com exatamente o mesmo nome (ex.: "PNAE"
+            // aparece duas vezes no FME, como 15.051 e 15.052 — valores de parcelas diferentes) —
+            // nesse caso soma os dois: quem pergunta "quanto tem de PNAE" quer o total, mesmo que
+            // venha de dois códigos/contas diferentes na planilha de origem.
+            const chaves = Array.from(new Set(candidatos
+                .filter(c => c.fundo === melhor.fundo && c.nome === melhor.nome)
+                .map(c => c.chave)));
+            return { fundo: melhor.fundo, nome: melhor.nome, chaves };
+        }
+
+        // ---- Saldo em conta de uma fonte vinculada específica (ex.: "saldo do QSE", "saldo da
+        // fonte do PNAE") — essa é uma posição de conta bancária (aba Saldo em Conta), bem
+        // diferente do "saldo do período" (receita − despesa) que os outros handlers calculam, por
+        // isso é tratado à parte, direto a partir de registrosSaldos. ----
+        function chatHandlerSaldoFonteVinculada(texto, ctx) {
+            if (!PALAVRAS_INTENCAO_SALDO.some(p => texto.includes(p))) return null;
+            const fonteAchada = chatEncontrarFonte(texto);
+            if (!fonteAchada) return null;
+
+            if (registrosSaldos.length === 0) {
+                return { texto: 'Os dados de saldo em conta ainda não carregaram — tenta perguntar de novo daqui a pouco.', itens: [], titulo: '', subtitulo: '' };
+            }
+
+            const mesAlvo = ctx.mesIdx === null ? mesMaisRecenteNoAnoSelecionado(registrosSaldos) : ctx.mesIdx;
+            const anoAlvo = resolverAnoSaldos(document.getElementById('selectAno').value.toUpperCase());
+            const linhas = registrosSaldos.filter(r =>
+                r.fundo === fonteAchada.fundo && fonteAchada.chaves.includes(r.chaveFonte) && r.mesIdx === mesAlvo &&
+                (!anoAlvo || r.ano === anoAlvo));
+
+            const total = linhas.reduce((s, r) => s + r.saldo, 0);
+            const periodoTexto = chatFormatarMesAno(mesAlvo, anoAlvo || ctx.ano);
+            const textoResposta = linhas.length === 0
+                ? `Não encontrei saldo de ${fonteAchada.nome} (${fonteAchada.fundo}) em ${periodoTexto}.`
+                : `Em ${periodoTexto}, o saldo em conta de ${fonteAchada.nome} (${fonteAchada.fundo}) é de <strong>${formatarValor(total)}</strong>. Veja mais na aba Saldo em Conta.`;
+            return { texto: textoResposta, itens: [], titulo: fonteAchada.nome, subtitulo: `${fonteAchada.fundo} • ${periodoTexto}` };
+        }
+
+        // ---- Saldo da fonte 100 (recursos livres) do Executivo — reaproveita agregarExecutivoFonte100,
+        // a MESMA conta já usada e testada na aba Repasses, pra garantir que o número bate. Esse é o
+        // "saldo do período" (receita − repasses − despesas), diferente do saldo em conta bancária
+        // calculado pelo handler acima. ----
+        function chatHandlerSaldoFonte100(texto, ctx) {
+            if (!PALAVRAS_INTENCAO_SALDO.some(p => texto.includes(p))) return null;
+            if (!(texto.includes('FONTE 100') || texto.includes('VERBA LIVRE') || texto.includes('RECURSO LIVRE') || texto.includes('RECURSOS LIVRES'))) return null;
+            if (ctx.ano !== ANO_ORDENS_PAGAMENTO) {
+                return { texto: `O cálculo de saldo da fonte 100 só está disponível a partir de ${ANO_ORDENS_PAGAMENTO} (aba Repasses).`, itens: [], titulo: '', subtitulo: '' };
+            }
+
+            const exec = agregarExecutivoFonte100();
+            const valor = ctx.mesIdx === null ? exec.saldo.reduce((s, v) => s + v, 0) : exec.saldo[ctx.mesIdx];
+            const periodoTexto = chatFormatarMesAno(ctx.mesIdx, ctx.ano);
+            const situacao = valor >= 0 ? 'superávit' : 'déficit';
+            const textoResposta = `Em ${periodoTexto}, a fonte 100 (recursos livres) do Executivo fechou com <strong>${situacao} de ${formatarValor(Math.abs(valor))}</strong> — veja o detalhamento na aba Repasses.`;
+            return { texto: textoResposta, itens: [], titulo: '', subtitulo: '' };
+        }
+
+        // ---- Última guarda pra "saldo de uma fonte": se a pergunta claramente pede o saldo de
+        // UMA fonte específica (menciona a palavra "fonte") mas nem a legenda de fontes vinculadas
+        // (handler acima) nem a fonte 100 reconheceram do que se trata, é melhor admitir do que
+        // cair no handler de saldo genérico e devolver o saldo do fundo inteiro — que responderia
+        // uma pergunta bem mais ampla do que a que foi feita, parecendo certo sem ser. ----
+        function chatHandlerSaldoFonteDesconhecida(texto, ctx) {
+            if (!PALAVRAS_INTENCAO_SALDO.some(p => texto.includes(p)) || !texto.includes('FONTE')) return null;
+            return {
+                texto: 'Não reconheci essa fonte de recurso na legenda que a Prefeitura confirmou (aba Saldo em Conta). Tenta usar o nome como aparece lá (ex.: "QSE", "PNAE", "Transporte Escolar", "CIP") ou confere o código da fonte diretamente naquela aba.',
+                itens: [], titulo: '', subtitulo: ''
+            };
+        }
+
+        const CHAT_HANDLERS = [chatHandlerForaDeEscopo, chatHandlerSaldoFonteVinculada, chatHandlerSaldoFonte100, chatHandlerSaldoFonteDesconhecida, chatHandlerTopico, chatHandlerRepasse, chatHandlerCategoriaFluxo, chatHandlerReceitaPalavraChave, chatHandlerSaldo, chatHandlerLivre];
 
         function responderPergunta(perguntaBruta) {
             if (registrosBrutosExcel.length === 0) {
