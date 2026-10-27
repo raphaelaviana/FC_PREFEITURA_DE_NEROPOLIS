@@ -171,7 +171,7 @@
             border-color: #1b365d;
         }
 
-        #listaReceitas table, #listaFornecedores table, #listaFolha table, #listaSaldos table, #listaOutrasFontes table, #listaEmendas table {
+        #listaReceitas table, #listaCategoriasTcm table, #listaFolha table, #listaSaldos table, #listaOutrasFontes table, #listaEmendas table {
             border-collapse: collapse;
         }
 
@@ -393,6 +393,20 @@
                 <div id="painelLimitePessoal" class="grid grid-cols-1 lg:grid-cols-3 gap-4 p-4"></div>
             </div>
 
+            <div class="bg-white rounded-lg shadow-lg overflow-hidden border border-slate-200 mb-4">
+                <div class="bg-[#1b365d] text-white px-4 py-3 border-b-4 border-[#e65100] flex items-center justify-between gap-3">
+                    <div>
+                        <h3 class="text-sm font-bold">EVOLUÇÃO DO LIMITE DE GASTOS COM PESSOAL</h3>
+                        <p class="text-xs text-blue-200 mt-0.5">% da RCL ajustada por bimestre, desde dezembro de 2024</p>
+                    </div>
+                    <button onclick="alternarTabelaLimitePessoalHistorico()" id="botaoTabelaLimitePessoalHistorico" class="text-xs bg-white/10 hover:bg-white/20 px-2.5 py-1 rounded-md flex items-center gap-1 shrink-0 whitespace-nowrap">
+                        <i data-lucide="table" class="w-3.5 h-3.5"></i><span>Ver tabela</span>
+                    </button>
+                </div>
+                <div id="graficoLimitePessoalHistoricoWrap" class="grid grid-cols-1 lg:grid-cols-3 gap-4 p-4"></div>
+                <div id="tabelaLimitePessoalHistoricoWrap" class="hidden p-4 overflow-x-auto"></div>
+            </div>
+
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
                 <div class="bg-white rounded-lg shadow-lg overflow-hidden border border-slate-200">
                     <div class="bg-[#1b365d] text-white px-4 py-3 border-b-4 border-[#e65100]">
@@ -404,10 +418,10 @@
 
                 <div class="bg-white rounded-lg shadow-lg overflow-hidden border border-slate-200">
                     <div class="bg-[#1b365d] text-white px-4 py-3 border-b-4 border-[#e65100]">
-                        <h3 class="text-sm font-bold">TOP 10 FORNECEDORES</h3>
-                        <p class="text-xs text-blue-200 mt-0.5">Maiores gastos no ano (exclui Fopag e Despesas Tributárias)</p>
+                        <h3 class="text-sm font-bold">TOP 10 CATEGORIAS (TCM)</h3>
+                        <p class="text-xs text-blue-200 mt-0.5">Maiores gastos por categoria no ano (exclui Fopag e Despesas Tributárias) — clique numa categoria pra ver os fornecedores</p>
                     </div>
-                    <div id="listaFornecedores" class="overflow-x-auto"></div>
+                    <div id="listaCategoriasTcm" class="overflow-x-auto"></div>
                 </div>
             </div>
 
@@ -1533,10 +1547,187 @@
             if (typeof lucide !== 'undefined') lucide.createIcons();
         }
 
+        /* ---------- Gráfico histórico do Limite de Gastos com Pessoal ----------
+           Pedido da Daniella: manter os 3 cards de medidor acima exatamente como estão
+           ("quero que fique do jeito que tá") e ADICIONAR um gráfico de linha com os
+           bimestres anteriores, pra ver como o % cresceu ou diminuiu desde dezembro de
+           2024. Série extraída à mão dos 12 relatórios PDF que ela salvou na pasta
+           "% fopag_receita" (mesma fonte oficial da LRF usada em DADOS_LIMITE_PESSOAL
+           acima — o ponto de jun/26 bate exatamente com o valor já hardcoded ali).
+           Atualize esta lista a cada novo bimestre publicado, junto com DADOS_LIMITE_PESSOAL. */
+        const HISTORICO_LIMITE_PESSOAL = [
+            { bimestre: 'DEZ/24', referencia: '01/2024 a 12/2024', consolidado: 39.88, executivo: 36.86, legislativo: 3.01 },
+            { bimestre: 'FEV/25', referencia: '03/2024 a 02/2025', consolidado: 39.45, executivo: 36.43, legislativo: 3.03 },
+            { bimestre: 'ABR/25', referencia: '05/2024 a 04/2025', consolidado: 40.01, executivo: 36.95, legislativo: 3.06 },
+            { bimestre: 'JUN/25', referencia: '07/2024 a 06/2025', consolidado: 40.61, executivo: 37.45, legislativo: 3.17 },
+            { bimestre: 'AGO/25', referencia: '09/2024 a 08/2025', consolidado: 41.51, executivo: 38.29, legislativo: 3.21 },
+            { bimestre: 'OUT/25', referencia: '11/2024 a 10/2025', consolidado: 42.15, executivo: 38.91, legislativo: 3.25 },
+            { bimestre: 'DEZ/25', referencia: '01/2025 a 12/2025', consolidado: 42.53, executivo: 39.19, legislativo: 3.34 },
+            { bimestre: 'FEV/26', referencia: '03/2025 a 02/2026', consolidado: 43.88, executivo: 40.42, legislativo: 3.46 },
+            { bimestre: 'ABR/26', referencia: '05/2025 a 04/2026', consolidado: 44.89, executivo: 41.39, legislativo: 3.49 },
+            { bimestre: 'JUN/26', referencia: '07/2025 a 06/2026', consolidado: 45.91, executivo: 43.26, legislativo: 2.65 },
+            { bimestre: 'AGO/26', referencia: '09/2025 a 08/2026', consolidado: 47.29, executivo: 43.62, legislativo: 3.67 },
+            { bimestre: 'OUT/26', referencia: '11/2025 a 10/2026', consolidado: 46.06, executivo: 42.63, legislativo: 3.43 }
+        ];
+
+        // Cores categóricas (paleta validada pelo skill de dataviz — 3 primeiros slots,
+        // ordem fixa, passam em todos os pares em modo claro; este painel não tem modo escuro).
+        const SERIES_LIMITE_PESSOAL_HISTORICO = [
+            { chave: 'consolidado', nome: 'Consolidado (Executivo + Legislativo)', cor: '#2a78d6' },
+            { chave: 'executivo', nome: 'Poder Executivo', cor: '#eb6834' },
+            { chave: 'legislativo', nome: 'Poder Legislativo', cor: '#1baf7a' }
+        ];
+
+        function renderMiniGraficoLimitePessoal(serie) {
+            const { chave, nome, cor } = serie;
+            const pontos = HISTORICO_LIMITE_PESSOAL.map(b => b[chave]);
+            const n = pontos.length;
+            const min = Math.min(...pontos), max = Math.max(...pontos);
+            const faixa = Math.max(max - min, 0.4);
+            const margem = faixa * 0.35;
+            let yMin = Math.floor((min - margem) * 10) / 10;
+            let yMax = Math.ceil((max + margem) * 10) / 10;
+            if (yMin < 0) yMin = 0;
+            if (yMax - yMin < 0.1) yMax = yMin + 1;
+
+            const W = 300, H = 168, padL = 36, padR = 12, padT = 16, padB = 22;
+            const plotW = W - padL - padR, plotH = H - padT - padB;
+            const xDe = i => padL + (plotW * i) / (n - 1);
+            const yDe = v => padT + plotH - ((v - yMin) / (yMax - yMin)) * plotH;
+
+            const pts = HISTORICO_LIMITE_PESSOAL.map((b, i) => ({
+                x: xDe(i), y: yDe(b[chave]), v: b[chave], bimestre: b.bimestre, referencia: b.referencia
+            }));
+            const linha = pts.map((p, i) => (i === 0 ? 'M' : 'L') + p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' ');
+
+            // Gridlines horizontais (hairline, 1px, sólida, recessiva) em 3 níveis: min, meio, max da escala.
+            const ticksY = [yMin, (yMin + yMax) / 2, yMax];
+            const gridlines = ticksY.map(t => {
+                const yy = yDe(t).toFixed(1);
+                return `<line x1="${padL}" y1="${yy}" x2="${W - padR}" y2="${yy}" stroke="#e2e8f0" stroke-width="1"/>`
+                    + `<text x="${padL - 5}" y="${yy}" dy="3" text-anchor="end" font-size="8.5" fill="#94a3b8">${formatarPercentual(t)}</text>`;
+            }).join('');
+
+            // Rótulos do eixo X: só no primeiro, meio e último ponto, pra não lotar o gráfico
+            // (a info completa de cada bimestre fica no hover e na visão em tabela).
+            const indicesRotulo = [0, Math.round((n - 1) / 2), n - 1];
+            const rotulosX = indicesRotulo.map(i => {
+                const p = pts[i];
+                return `<text x="${p.x.toFixed(1)}" y="${H - 6}" text-anchor="middle" font-size="8.5" fill="#94a3b8">${escapeHtml(p.bimestre)}</text>`;
+            }).join('');
+
+            // Camada de hover: um grupo oculto por ponto com crosshair + dot destacado + tooltip,
+            // revelado por um círculo-alvo maior e invisível (hit target maior que a marca, por cima).
+            const camadasHover = pts.map((p, i) => {
+                const tipLargura = 92, tipAltura = 20;
+                let tipX = Math.min(Math.max(p.x, padL + tipLargura / 2), W - padR - tipLargura / 2);
+                let tipY = p.y - 26;
+                if (tipY < padT - 4) tipY = p.y + 10;
+                return `
+                    <g id="hoverLimitePessoal_${chave}_${i}" style="display:none; pointer-events:none;">
+                        <line x1="${p.x.toFixed(1)}" y1="${padT}" x2="${p.x.toFixed(1)}" y2="${H - padB}" stroke="#94a3b8" stroke-width="1"/>
+                        <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="5" fill="${cor}" stroke="#ffffff" stroke-width="2"/>
+                        <rect x="${(tipX - tipLargura / 2).toFixed(1)}" y="${tipY.toFixed(1)}" width="${tipLargura}" height="${tipAltura}" rx="3" fill="#1b365d"/>
+                        <text x="${tipX.toFixed(1)}" y="${(tipY + tipAltura / 2).toFixed(1)}" dy="3.5" text-anchor="middle" font-size="9" fill="#ffffff" font-weight="600">${escapeHtml(p.bimestre)} • ${formatarPercentual(p.v)}</text>
+                    </g>
+                    <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="9" fill="transparent"
+                        onmouseenter="document.getElementById('hoverLimitePessoal_${chave}_${i}').style.display='block'"
+                        onmouseleave="document.getElementById('hoverLimitePessoal_${chave}_${i}').style.display='none'"/>
+                `;
+            }).join('');
+
+            const atual = pontos[n - 1];
+            const anterior = pontos[n - 2];
+            const delta = atual - anterior;
+            const subiu = delta > 0.005, desceu = delta < -0.005;
+            // No indicador de limite de pessoal, subir aproxima do teto da LRF (ruim = vermelho) e
+            // descer afasta do teto (bom = verde) — mesma leitura de cor das zonas dos medidores acima.
+            const corDelta = subiu ? '#d03b3b' : (desceu ? '#0ca30c' : '#64748b');
+            const iconeDelta = subiu ? 'trending-up' : (desceu ? 'trending-down' : 'minus');
+            const textoDelta = (subiu ? '+' : '') + delta.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' p.p.';
+
+            return `
+                <div class="border border-slate-200 rounded-lg p-3">
+                    <div class="flex items-center justify-between gap-2">
+                        <p class="text-xs font-bold text-slate-500 uppercase">${escapeHtml(nome)}</p>
+                        <span class="inline-flex items-center gap-0.5 text-[10px] font-bold" style="color:${corDelta};">
+                            <i data-lucide="${iconeDelta}" class="w-3 h-3"></i>${textoDelta}
+                        </span>
+                    </div>
+                    <svg viewBox="0 0 ${W} ${H}" class="w-full h-auto mt-1" style="overflow:visible;">
+                        ${gridlines}
+                        <path d="${linha}" fill="none" stroke="${cor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <circle cx="${pts[n - 1].x.toFixed(1)}" cy="${pts[n - 1].y.toFixed(1)}" r="4" fill="${cor}" stroke="#ffffff" stroke-width="2"/>
+                        <text x="${(pts[n - 1].x - 7).toFixed(1)}" y="${(pts[n - 1].y - 11).toFixed(1)}" text-anchor="end" font-size="9.5" font-weight="700" fill="#334155" stroke="#ffffff" stroke-width="3" stroke-linejoin="round" paint-order="stroke">${formatarPercentual(atual)}</text>
+                        ${rotulosX}
+                        ${camadasHover}
+                    </svg>
+                </div>
+            `;
+        }
+
+        function renderGraficoLimitePessoalHistorico() {
+            const container = document.getElementById('graficoLimitePessoalHistoricoWrap');
+            if (!container) return;
+            container.innerHTML = SERIES_LIMITE_PESSOAL_HISTORICO.map(renderMiniGraficoLimitePessoal).join('');
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
+
+        function renderTabelaLimitePessoalHistorico() {
+            const container = document.getElementById('tabelaLimitePessoalHistoricoWrap');
+            if (!container) return;
+            const linhas = HISTORICO_LIMITE_PESSOAL.map(b => `
+                <tr class="border-b border-slate-100">
+                    <td class="py-1.5 pr-3 font-semibold text-slate-700">${escapeHtml(b.bimestre)}</td>
+                    <td class="py-1.5 pr-3 text-slate-400">${escapeHtml(b.referencia)}</td>
+                    <td class="py-1.5 pr-3 text-right text-slate-700">${formatarPercentual(b.consolidado)}</td>
+                    <td class="py-1.5 pr-3 text-right text-slate-700">${formatarPercentual(b.executivo)}</td>
+                    <td class="py-1.5 pr-3 text-right text-slate-700">${formatarPercentual(b.legislativo)}</td>
+                </tr>
+            `).join('');
+            container.innerHTML = `
+                <table class="w-full text-xs">
+                    <thead>
+                        <tr class="border-b-2 border-slate-200 text-slate-500 uppercase text-[10px]">
+                            <th class="text-left py-1.5 pr-3">Bimestre</th>
+                            <th class="text-left py-1.5 pr-3">Período (últimos 12 meses)</th>
+                            <th class="text-right py-1.5 pr-3">Consolidado</th>
+                            <th class="text-right py-1.5 pr-3">Executivo</th>
+                            <th class="text-right py-1.5 pr-3">Legislativo</th>
+                        </tr>
+                    </thead>
+                    <tbody>${linhas}</tbody>
+                </table>
+            `;
+        }
+
+        function alternarTabelaLimitePessoalHistorico() {
+            const graf = document.getElementById('graficoLimitePessoalHistoricoWrap');
+            const tab = document.getElementById('tabelaLimitePessoalHistoricoWrap');
+            const botao = document.getElementById('botaoTabelaLimitePessoalHistorico');
+            if (!graf || !tab || !botao) return;
+            const mostrandoTabela = !tab.classList.contains('hidden');
+            if (mostrandoTabela) {
+                tab.classList.add('hidden');
+                graf.classList.remove('hidden');
+                botao.innerHTML = '<i data-lucide="table" class="w-3.5 h-3.5"></i><span>Ver tabela</span>';
+            } else {
+                if (!tab.dataset.renderizado) {
+                    renderTabelaLimitePessoalHistorico();
+                    tab.dataset.renderizado = '1';
+                }
+                tab.classList.remove('hidden');
+                graf.classList.add('hidden');
+                botao.innerHTML = '<i data-lucide="line-chart" class="w-3.5 h-3.5"></i><span>Ver gráfico</span>';
+            }
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
+
         function atualizarIndicadores() {
             if (!document.getElementById('abaIndicadores')) return;
 
             renderLimitePessoal();
+            renderGraficoLimitePessoalHistorico();
 
             const fundoSelecionado = document.getElementById('selectFundo').value.toUpperCase();
             const anoSelecionado = document.getElementById('selectAno').value.toUpperCase();
@@ -1544,7 +1735,7 @@
             const mesSel = selMes ? parseInt(selMes.value, 10) : 0;
 
             renderReceitasIndicador(fundoSelecionado, anoSelecionado, mesSel);
-            renderFornecedoresIndicador(fundoSelecionado, anoSelecionado);
+            renderCategoriasTcmIndicador(fundoSelecionado, anoSelecionado);
             renderFolhaIndicador(fundoSelecionado, anoSelecionado, mesSel);
         }
 
@@ -1605,8 +1796,8 @@
             `;
         }
 
-        function renderFornecedoresIndicador(fundoSelecionado, anoSelecionado) {
-            const container = document.getElementById('listaFornecedores');
+        function renderCategoriasTcmIndicador(fundoSelecionado, anoSelecionado) {
+            const container = document.getElementById('listaCategoriasTcm');
             if (!container) return;
 
             const classificacoesValidas = new Set(obterClassificacoesDespesa(['FOPAG', 'DESPESAS TRIBUTÁRIAS']));
@@ -1617,7 +1808,7 @@
                 if (!fundoCorresponde(reg.fundo, fundoSelecionado)) return;
                 if (!classificacoesValidas.has(reg.classificacao)) return;
 
-                const chave = (reg.descricao && reg.descricao.trim()) || 'NÃO IDENTIFICADO';
+                const chave = (reg.tcm && reg.tcm.trim()) || 'NÃO CLASSIFICADO';
                 mapa.set(chave, (mapa.get(chave) || 0) + reg.saldo);
             });
 
@@ -1631,11 +1822,12 @@
                 return;
             }
 
-            const linhas = top10.map((f, idx) => `
-                <tr class="border-b border-slate-100">
+            const linhas = top10.map((c, idx) => `
+                <tr class="border-b border-slate-100 cursor-pointer hover:bg-slate-50" data-tcm="${escapeHtml(c.nome)}">
                     <td class="py-2 px-3 text-slate-400 font-bold w-8">${idx + 1}º</td>
-                    <td class="py-2 px-3 text-slate-700 font-medium">${escapeHtml(f.nome)}</td>
-                    <td class="py-2 px-3 text-right font-semibold whitespace-nowrap">${formatarValor(f.total)}</td>
+                    <td class="py-2 px-3 text-slate-700 font-medium">${escapeHtml(c.nome)}</td>
+                    <td class="py-2 px-3 text-right font-semibold whitespace-nowrap">${formatarValor(c.total)}</td>
+                    <td class="py-2 pl-1 pr-3 text-slate-300 w-6"><i data-lucide="chevron-right" class="w-4 h-4"></i></td>
                 </tr>
             `).join('');
 
@@ -1644,13 +1836,83 @@
                     <thead>
                         <tr class="text-left text-slate-500 border-b-2 border-slate-200">
                             <th class="py-2 px-3 font-semibold w-8">#</th>
-                            <th class="py-2 px-3 font-semibold">FORNECEDOR</th>
+                            <th class="py-2 px-3 font-semibold">CATEGORIA (TCM)</th>
                             <th class="py-2 px-3 font-semibold text-right">TOTAL GASTO</th>
+                            <th class="py-2 pl-1 pr-3 w-6"></th>
                         </tr>
                     </thead>
                     <tbody>${linhas}</tbody>
                 </table>
             `;
+
+            container.querySelectorAll('tr[data-tcm]').forEach(tr => {
+                const tcm = tr.getAttribute('data-tcm');
+                tr.addEventListener('click', () => abrirPainelFornecedoresPorTcm(tcm, fundoSelecionado, anoSelecionado));
+            });
+
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
+
+        // ---- Detalhe de uma categoria (TCM) do card "Top 10 Categorias": lista os fornecedores pagos
+        // dentro dela, com um resuminho do que cada um faz — extraído do histórico do empenho (mesma
+        // fonte da aba Gastos por Tópico), já que só o nome da empresa não diz nada pro prefeito. ----
+        function abrirPainelFornecedoresPorTcm(tcm, fundoSelecionado, anoSelecionado) {
+            const classificacoesValidas = new Set(obterClassificacoesDespesa(['FOPAG', 'DESPESAS TRIBUTÁRIAS']));
+
+            const mapa = new Map();
+            registrosBrutosExcel.forEach(reg => {
+                if (anoSelecionado !== 'TODOS' && reg.ano !== anoSelecionado) return;
+                if (!fundoCorresponde(reg.fundo, fundoSelecionado)) return;
+                if (!classificacoesValidas.has(reg.classificacao)) return;
+                const chaveTcm = (reg.tcm && reg.tcm.trim()) || 'NÃO CLASSIFICADO';
+                if (chaveTcm !== tcm) return;
+
+                const nome = (reg.descricao && reg.descricao.trim()) || 'NÃO IDENTIFICADO';
+                if (!mapa.has(nome)) mapa.set(nome, { nome, total: 0, historicos: new Map() });
+                const g = mapa.get(nome);
+                g.total += reg.saldo;
+                const hist = reg.empenho ? mapaHistoricoPorEmpenho.get(String(reg.empenho)) : null;
+                if (hist && hist.historico) {
+                    g.historicos.set(hist.historico, (g.historicos.get(hist.historico) || 0) + 1);
+                }
+            });
+
+            const fornecedores = Array.from(mapa.values())
+                .map(g => {
+                    let resumo = '';
+                    if (g.historicos.size > 0) {
+                        resumo = Array.from(g.historicos.entries()).sort((a, b) => b[1] - a[1])[0][0];
+                    }
+                    return { nome: g.nome, total: g.total, resumo: resumo ? limitarTamanho(resumo, 90) : '' };
+                })
+                .sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
+
+            document.getElementById('painelTitulo').textContent = tcm;
+            document.getElementById('painelSubtitulo').textContent = `${fundoSelecionado} • ${anoSelecionado === 'TODOS' ? 'todos os anos' : anoSelecionado}`;
+            renderBreadcrumbTopico([{ label: 'Top 10 categorias', onClick: () => atualizarIndicadores() }, { label: tcm }]);
+            renderListaFornecedoresComResumo(fornecedores);
+            abrirOverlayPainel();
+        }
+
+        // Lista final (fornecedor + resuminho do que ele faz, quando encontrado + valor) — sem seta,
+        // é o último nível, igual renderListaSimples, só que com uma linha extra de descrição.
+        function renderListaFornecedoresComResumo(itens) {
+            const contentEl = document.getElementById('painelConteudo');
+            if (itens.length === 0) {
+                contentEl.innerHTML = '<p class="text-slate-400 text-sm text-center py-10">Nenhum fornecedor encontrado.</p>';
+                return;
+            }
+            const total = itens.reduce((s, it) => s + it.total, 0);
+            contentEl.innerHTML = `<p class="text-xs text-slate-400 mb-2">${itens.length} fornecedor${itens.length === 1 ? '' : 'es'} • total ${formatarValor(total)}</p>` +
+                itens.map(it => `
+                    <div class="py-2.5 border-b border-slate-100">
+                        <div class="flex items-center justify-between gap-3">
+                            <span class="text-sm font-semibold text-slate-800">${escapeHtml(it.nome)}</span>
+                            <span class="text-sm font-semibold text-slate-800 whitespace-nowrap">${formatarValor(it.total)}</span>
+                        </div>
+                        ${it.resumo ? `<p class="text-xs text-slate-500 mt-0.5">${escapeHtml(it.resumo)}</p>` : '<p class="text-xs text-slate-300 mt-0.5 italic">sem histórico de empenho pra descrever</p>'}
+                    </div>
+                `).join('');
         }
 
         /* ---------- Folha de Pagamento (planilha separada) ---------- */
@@ -2802,7 +3064,9 @@
             { chave: 'obras', nome: 'Obras e Infraestrutura', icone: 'hard-hat', badge: 'bg-orange-50 text-orange-700' },
             { chave: 'iluminacao', nome: 'Iluminação Pública', icone: 'lightbulb', badge: 'bg-amber-50 text-amber-700' },
             { chave: 'saude', nome: 'Saúde (medicamentos, cirurgias, exames)', icone: 'heart-pulse', badge: 'bg-rose-50 text-rose-700' },
-            { chave: 'educacao', nome: 'Educação', icone: 'graduation-cap', badge: 'bg-blue-50 text-blue-700' },
+            { chave: 'alimentacaoEscolar', nome: 'Alimentação Escolar (FME)', icone: 'utensils', badge: 'bg-emerald-50 text-emerald-700' },
+            { chave: 'materialEscolar', nome: 'Material Escolar (FME)', icone: 'backpack', badge: 'bg-sky-50 text-sky-700' },
+            { chave: 'educacao', nome: 'Educação (outros)', icone: 'graduation-cap', badge: 'bg-blue-50 text-blue-700' },
             { chave: 'assistencia', nome: 'Assistência Social', icone: 'heart-handshake', badge: 'bg-teal-50 text-teal-700' },
             { chave: 'frota', nome: 'Frota e Combustível', icone: 'fuel', badge: 'bg-cyan-50 text-cyan-700' }
         ];
@@ -2877,12 +3141,26 @@
             renderGastosPorTopico();
         }
 
-        // Ordem importa: primeira regra que bater define o tópico. Iluminação Pública é checada
-        // antes de Obras porque as duas às vezes usam o mesmo elemento orçamentário (449051).
+        // Ordem importa: primeira regra que bater define o tópico. TODAS as regras por palavra-
+        // chave específica vêm antes do "catch-all" de Obras por código de elemento orçamentário
+        // (449051 = Equipamentos e Material Permanente, no fim da função) — esse elemento é usado
+        // pra compras/contratos de tipos bem diferentes (gerenciamento de frota, sistema via web,
+        // equipamento pro cemitério, pro abrigo de animais...), não só obra/pavimentação de
+        // verdade. Antes, como ele era checado logo no início, "engolia" todos esses outros
+        // tópicos dentro de Obras — por isso o card de Obras tinha tanta coisa misturada.
         function classificarTopicoEmpenho(hist) {
             const h = hist.historicoNorm;
             const e = hist.elementoNorm;
             const f = hist.fundo;
+
+            // Subvenção social (elementos 14.00.55/14.00.56) — confirmado pela Daniella: isso é
+            // repasse de subvenção social a entidade, não uma despesa de festa, mesmo quando o
+            // histórico cita "festa das crianças" (era o item de ~R$ 698 mil que tinha ficado sem
+            // classificação). Por isso essa regra vem ANTES da checagem de festividades abaixo —
+            // o código do elemento manda nesse caso, não a palavra "festa" no texto.
+            if (e.indexOf('140056') === 0 || e.indexOf('140055') === 0) {
+                return 'assistencia';
+            }
 
             // ANIVERSARIO/FESTIVIDADE/ROCK FEST/NORDESTINO foram incluídos porque vários empenhos
             // reais de festa (ex.: "Nerópolis Rock Fest", "Dia do Nordestino") usam essas palavras
@@ -2894,37 +3172,96 @@
             if (h.includes('ILUMINACAO PUBLICA') || (h.includes('ILUMINACAO') && h.includes('PUBLICA'))) {
                 return 'iluminacao';
             }
-            const ehElementoObras = e.indexOf('449051') === 0;
-            const temPalavraDeObra = ['CONSTRUCAO', 'PAVIMENTACAO', 'REFORMA', 'ASFALT', 'CALCAMENTO', 'DRENAGEM'].some(k => h.includes(k));
+
+            // Tópicos por local/secretaria/assunto que ficam DENTRO de Obras — não são tópicos à
+            // parte (a Daniella pediu que fossem subgrupos do próprio tópico Obras, pra não
+            // espalhar o painel em vários cards). O subgrupo específico de cada um (Tapa Buraco,
+            // Cemitério, Abrigo de Animais, Secretaria de Desenvolvimento, Parque Agropecuário,
+            // "geral") é calculado separadamente por classificarSubgrupoObras(), usado só na hora
+            // de exibir o drill-down de Obras (nível 1 do painel) e no chat.
+            if (h.includes('CEMITERIO')) {
+                return 'obras';
+            }
+            if (h.includes('ABRIGO') && (h.includes('ANIMAL') || h.includes('ANIMAIS'))) {
+                return 'obras';
+            }
+            if (/SECRETARIA\s+DE\s+DESENVOLVIMENTO|\bSEC\.?\s*DESENVOLVIMENTO\b/.test(h)) {
+                return 'obras';
+            }
+            if (h.includes('AGROPECUARIO')) {
+                return 'obras';
+            }
+
             const ehElementoPessoal = e.indexOf('319') === 0 || e.indexOf('339034') === 0 || e.indexOf('339004') === 0;
             // 339047 é taxa/ART de conselho profissional (ex.: CREA) — mesmo mencionando
             // "pavimentação", é uma taxa administrativa pequena, não o custo da obra em si.
             const ehElementoTaxaRegulatoria = e.indexOf('339047') === 0;
-            if ((ehElementoObras || temPalavraDeObra) && !ehElementoPessoal && !ehElementoTaxaRegulatoria) {
+
+            // Tapa-buraco: massa asfáltica, asfalto, pavimentação ou calçamento — subgrupo de
+            // Obras e Infraestrutura (não um tópico à parte; ver classificarSubgrupoObras).
+            if (['MASSA ASFALTICA', 'ASFALT', 'PAVIMENTACAO', 'CALCAMENTO', 'TAPA BURACO', 'TAPA-BURACO'].some(k => h.includes(k)) && !ehElementoPessoal && !ehElementoTaxaRegulatoria) {
                 return 'obras';
             }
+            if (['CONSTRUCAO', 'REFORMA', 'DRENAGEM'].some(k => h.includes(k)) && !ehElementoPessoal && !ehElementoTaxaRegulatoria) {
+                return 'obras';
+            }
+
             if (['MEDICAMENTO', 'FARMAC', 'CIRURGIA', 'OCULOS'].some(k => h.includes(k))) {
                 return 'saude';
             }
             if (h.includes('EXAME') && f === 'FMS') {
                 return 'saude';
             }
-            if (['MERENDA', 'ESCOLAR', 'CMEI', 'CRECHE'].some(k => h.includes(k))) {
+
+            // Educação (FME): separado em Alimentação Escolar (merenda/gêneros alimentícios) e
+            // Material Escolar (material didático/kit/uniforme), a pedido da Daniella. Fora do
+            // FME, continua caindo no balaio geral "Educação (outros)" como antes.
+            if (f === 'FME' && ['MERENDA', 'ALIMENTACAO ESCOLAR', 'GENERO ALIMENTICIO', 'GENEROS ALIMENTICIOS'].some(k => h.includes(k))) {
+                return 'alimentacaoEscolar';
+            }
+            if (f === 'FME' && ['MATERIAL ESCOLAR', 'MATERIAL DIDATICO', 'KIT ESCOLAR', 'UNIFORME ESCOLAR', 'LIVRO DIDATICO'].some(k => h.includes(k))) {
+                return 'materialEscolar';
+            }
+            if (['MERENDA', 'ESCOLAR', 'CMEI', 'CRECHE', 'MATERIAL ESCOLAR', 'MATERIAL DIDATICO'].some(k => h.includes(k))) {
                 return 'educacao';
             }
+
             if (e.indexOf('339048') === 0 || h.includes('AUXILIO PECUNIARIO') || h.includes('RELATORIO SOCIAL')) {
                 return 'assistencia';
             }
-            // Além de "combustível"/"frota" (que já cobrem a maior parte), inclui também serviço
-            // de manutenção descrito sem a palavra "manutenção" (ex.: "troca de pneu", "conserto
-            // do veículo") — só conta como frota quando aparece junto com uma palavra de veículo,
-            // pra não pegar conserto/reparo de outra coisa (ex.: conserto de bomba d'água).
+            // Além de "combustível"/"frota" (que já cobrem a maior parte — inclusive "gerenciamento
+            // de frota" e "gerenciamento de sistema via web com fornecimento de combustível"),
+            // inclui também serviço de manutenção descrito sem a palavra "manutenção" (ex.: "troca
+            // de pneu", "conserto do veículo") — só conta como frota quando aparece junto com uma
+            // palavra de veículo, pra não pegar conserto/reparo de outra coisa (ex.: bomba d'água).
             const temPalavraDeVeiculo = ['VEICULO', 'FROTA', 'CAMINHAO', 'ONIBUS', 'MAQUINA', 'AUTOMOVEL', 'CARRO'].some(k => h.includes(k));
             const temPalavraDeManutencaoFrota = ['MANUTENCAO', 'PNEU', 'CONSERTO', 'REVISAO', 'OFICINA', 'REPARO', 'MECANICA', 'FUNILARIA', 'LATARIA', 'FILTRO', 'PECA'].some(k => h.includes(k));
             if (h.includes('COMBUSTIVEL') || h.includes('FROTA') || (temPalavraDeVeiculo && temPalavraDeManutencaoFrota)) {
                 return 'frota';
             }
+
+            // Catch-all por último: só pelo código do elemento orçamentário (449051), quando nada
+            // mais específico bateu acima.
+            if (e.indexOf('449051') === 0 && !ehElementoPessoal && !ehElementoTaxaRegulatoria) {
+                return 'obras';
+            }
             return null;
+        }
+
+        // Dentro de Obras e Infraestrutura, separa por subgrupo (pedido da Daniella: "o de obras
+        // tem muita coisa quando clica nele, temos que segregar em grupos" — Tapa Buraco,
+        // Cemitério, Abrigo de Animais, Secretaria de Desenvolvimento, Parque Agropecuário e o
+        // restante, "geral"). Mesmo padrão já usado em classificarTipoFrota: opera direto sobre o
+        // texto do histórico (não precisa reaplicar o filtro de elemento de pessoal/taxa — isso já
+        // foi decidido antes, na hora de classificar o item como 'obras').
+        function classificarSubgrupoObras(historicoOriginal) {
+            const h = normalizarTexto(String(historicoOriginal || ''));
+            if (h.includes('CEMITERIO')) return 'Cemitério';
+            if (h.includes('ABRIGO') && (h.includes('ANIMAL') || h.includes('ANIMAIS'))) return 'Abrigo de Animais';
+            if (/SECRETARIA\s+DE\s+DESENVOLVIMENTO|\bSEC\.?\s*DESENVOLVIMENTO\b/.test(h)) return 'Secretaria de Desenvolvimento';
+            if (h.includes('AGROPECUARIO')) return 'Parque Agropecuário';
+            if (['MASSA ASFALTICA', 'ASFALT', 'PAVIMENTACAO', 'CALCAMENTO', 'TAPA BURACO', 'TAPA-BURACO'].some(k => h.includes(k))) return 'Tapa Buraco (asfalto e pavimentação)';
+            return 'Obras e Infraestrutura (geral)';
         }
 
         function renderCardTopico(meta, grupo) {
@@ -3366,6 +3703,9 @@
         function onClickAbrirFrotaPorSecretaria(it) {
             return `abrirFrotaPorSecretaria(${escapeHtml(JSON.stringify(it.nome))})`;
         }
+        function onClickAbrirObrasPorSubgrupo(it) {
+            return `abrirObrasPorSubgrupo(${escapeHtml(JSON.stringify(it.nome))})`;
+        }
 
         function abrirOverlayPainel() {
             if (typeof lucide !== 'undefined') lucide.createIcons();
@@ -3399,6 +3739,13 @@
                 // secretaria — a secretaria vem no nível 2, ao clicar no tipo.
                 const itens = agruparItensPorRotulo([...grupo.itens.values()], classificarTipoFrota).sort((a, b) => b.valor - a.valor);
                 renderLinhasPainel(itens, onClickAbrirFrotaPorSecretaria);
+            } else if (chave === 'obras') {
+                // Nível 1 de Obras: separa por subgrupo (Tapa Buraco, Cemitério, Abrigo de
+                // Animais, Secretaria de Desenvolvimento, Parque Agropecuário, Obras geral) — pedido
+                // da Daniella pra não misturar tudo numa lista só ao clicar no card. O nível 2 (por
+                // obra/evento, dentro do subgrupo escolhido) é o mesmo usado nos demais tópicos.
+                const itens = agruparItensPorRotulo([...grupo.itens.values()], classificarSubgrupoObras).sort((a, b) => b.valor - a.valor);
+                renderLinhasPainel(itens, onClickAbrirObrasPorSubgrupo);
             } else {
                 const itens = agruparItensPorRotulo([...grupo.itens.values()], funcaoRotulo).sort((a, b) => b.valor - a.valor);
                 renderLinhasPainel(itens, onClickAbrirDetalheTopico);
@@ -3441,6 +3788,47 @@
 
             const itensDoGrupo = [...grupo.itens.values()]
                 .filter(it => classificarTipoFrota(it.historico) === tipo && (extrairSecretariaSomente(it.historico) || 'Outros') === secretaria)
+                .sort((a, b) => b.valor - a.valor);
+
+            renderDetalheEmpenhos(itensDoGrupo);
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
+
+        // Nível 2 de Obras: dentro do subgrupo escolhido (Tapa Buraco, Cemitério, Abrigo de
+        // Animais, Secretaria de Desenvolvimento, Parque Agropecuário ou Obras geral), agrupa por
+        // obra/evento — mesma extração de rótulo usada nos demais tópicos (extrairRotuloGasto).
+        function abrirObrasPorSubgrupo(subgrupo) {
+            if (!topicoPainelAtual || !topicoPainelAtual.grupo) return;
+            const { meta, grupo } = topicoPainelAtual;
+
+            document.getElementById('painelTitulo').textContent = subgrupo;
+            renderBreadcrumbTopico([
+                { label: meta.nome, onClick: () => abrirPainelTopico(topicoPainelAtual.chave) },
+                { label: subgrupo }
+            ]);
+
+            const itensDoSubgrupo = [...grupo.itens.values()].filter(it => classificarSubgrupoObras(it.historico) === subgrupo);
+            const itens = agruparItensPorRotulo(itensDoSubgrupo, extrairRotuloGasto).sort((a, b) => b.valor - a.valor);
+            renderLinhasPainel(itens, it => `abrirDetalheObras(${escapeHtml(JSON.stringify(subgrupo))}, ${escapeHtml(JSON.stringify(it.nome))})`);
+
+            abrirOverlayPainel();
+        }
+
+        // Nível 3 de Obras: número do empenho, breve descrição e valor — dentro do subgrupo e da
+        // obra/evento escolhidos.
+        function abrirDetalheObras(subgrupo, rotulo) {
+            if (!topicoPainelAtual || !topicoPainelAtual.grupo) return;
+            const { meta, grupo } = topicoPainelAtual;
+
+            document.getElementById('painelTitulo').textContent = rotulo;
+            renderBreadcrumbTopico([
+                { label: meta.nome, onClick: () => abrirPainelTopico(topicoPainelAtual.chave) },
+                { label: subgrupo, onClick: () => abrirObrasPorSubgrupo(subgrupo) },
+                { label: rotulo }
+            ]);
+
+            const itensDoGrupo = [...grupo.itens.values()]
+                .filter(it => classificarSubgrupoObras(it.historico) === subgrupo && (extrairRotuloGasto(it.historico) || 'Outros') === rotulo)
                 .sort((a, b) => b.valor - a.valor);
 
             renderDetalheEmpenhos(itensDoGrupo);
@@ -3899,24 +4287,46 @@
         // por Tópico" (classificarTopicoEmpenho), só que aqui também filtrada por mês/fundo. ----
         function chatHandlerTopico(texto, ctx) {
             const sinonimosTopico = {
-                obras: ['OBRA', 'OBRAS', 'INFRAESTRUTURA', 'PAVIMENTACAO', 'ASFALTO'],
+                obras: ['OBRA', 'OBRAS', 'INFRAESTRUTURA', 'CONSTRUCAO', 'REFORMA'],
                 saude: ['SAUDE', 'HOSPITAL', 'REMEDIO', 'REMEDIOS', 'MEDICAMENTO', 'MEDICAMENTOS', 'CIRURGIA'],
-                educacao: ['EDUCACAO', 'ESCOLA', 'ESCOLAR', 'MERENDA', 'CRECHE'],
+                alimentacaoEscolar: ['ALIMENTACAO ESCOLAR', 'MERENDA'],
+                materialEscolar: ['MATERIAL ESCOLAR', 'MATERIAL DIDATICO', 'KIT ESCOLAR', 'UNIFORME ESCOLAR'],
+                educacao: ['EDUCACAO', 'ESCOLA', 'ESCOLAR', 'CRECHE', 'CMEI'],
                 assistencia: ['ASSISTENCIA SOCIAL', 'ASSISTENCIA'],
                 frota: ['FROTA', 'COMBUSTIVEL', 'VEICULO', 'VEICULOS', 'CARRO', 'CARROS', 'ONIBUS', 'CAMINHAO'],
                 festividades: ['FESTA', 'FESTIVIDADE', 'FESTIVIDADES', 'EVENTO', 'EVENTOS'],
                 iluminacao: ['ILUMINACAO']
             };
-            let chaveEncontrada = null, palavraUsada = '';
-            for (const chave of Object.keys(sinonimosTopico)) {
-                const achou = sinonimosTopico[chave].find(p => texto.includes(p));
-                if (achou) { chaveEncontrada = chave; palavraUsada = achou; break; }
+            // Tapa Buraco, Cemitério, Abrigo de Animais, Secretaria de Desenvolvimento e Parque
+            // Agropecuário são SUBGRUPOS do tópico "obras" (não tópicos à parte — a Daniella pediu
+            // que ficassem dentro de Obras, igual no painel). Checa antes do dicionário geral:
+            // quando bate, além de identificar que o tópico é 'obras', já guarda qual subgrupo pra
+            // filtrar a resposta só por ele (senão "tapa buraco" devolveria o total de Obras todo).
+            const subgruposObrasChat = {
+                'Tapa Buraco (asfalto e pavimentação)': ['TAPA BURACO', 'TAPA-BURACO', 'ASFALTO', 'ASFALTICA', 'MASSA ASFALTICA', 'PAVIMENTACAO', 'CALCAMENTO'],
+                'Cemitério': ['CEMITERIO'],
+                'Abrigo de Animais': ['ABRIGO DE ANIMAIS', 'ABRIGO DOS ANIMAIS', 'ABRIGO ANIMAL'],
+                'Secretaria de Desenvolvimento': ['SECRETARIA DE DESENVOLVIMENTO', 'SEC DESENVOLVIMENTO'],
+                'Parque Agropecuário': ['PARQUE AGROPECUARIO', 'AGROPECUARIO']
+            };
+
+            let chaveEncontrada = null, palavraUsada = '', subgrupoObrasFiltro = null;
+            for (const subgrupo of Object.keys(subgruposObrasChat)) {
+                const achou = subgruposObrasChat[subgrupo].find(p => texto.includes(p));
+                if (achou) { chaveEncontrada = 'obras'; palavraUsada = achou; subgrupoObrasFiltro = subgrupo; break; }
+            }
+            if (!chaveEncontrada) {
+                for (const chave of Object.keys(sinonimosTopico)) {
+                    const achou = sinonimosTopico[chave].find(p => texto.includes(p));
+                    if (achou) { chaveEncontrada = chave; palavraUsada = achou; break; }
+                }
             }
             if (!chaveEncontrada) return null;
             if (!PALAVRAS_INTENCAO_DESPESA.some(p => texto.includes(p)) && !texto.includes('QUANTO')) return null;
             if (registrosHistoricoEmpenhos.length === 0) return null;
 
             const meta = TOPICOS_GASTO.find(t => t.chave === chaveEncontrada);
+            const nomeRotuloResposta = subgrupoObrasFiltro || meta.nome;
             const localExtra = chatExtrairLocal(texto, [palavraUsada].concat(ctx.termosConhecidos));
             const localTexto = localExtra.join(' ');
 
@@ -3929,6 +4339,7 @@
                 const hist = mapaHistoricoPorEmpenho.get(r.empenho);
                 const chave = hist ? (classificarTopicoEmpenho(hist) || 'naoClassificado') : 'semHistorico';
                 if (chave !== chaveEncontrada) return;
+                if (subgrupoObrasFiltro && (!hist || classificarSubgrupoObras(hist.historico) !== subgrupoObrasFiltro)) return;
                 if (localExtra.length > 0 && !(hist && localExtra.every(p => hist.historicoNorm.includes(p)))) return;
                 itens.push(r);
             });
@@ -3940,12 +4351,12 @@
             let textoResposta;
             if (itens.length === 0) {
                 textoResposta = localTexto
-                    ? `Não encontrei gasto de ${meta.nome} com "${localTexto.toLowerCase()}" em ${periodoTexto} (${ctx.fundo}).`
-                    : `Não encontrei gasto de ${meta.nome} em ${periodoTexto} (${ctx.fundo}).`;
+                    ? `Não encontrei gasto de ${nomeRotuloResposta} com "${localTexto.toLowerCase()}" em ${periodoTexto} (${ctx.fundo}).`
+                    : `Não encontrei gasto de ${nomeRotuloResposta} em ${periodoTexto} (${ctx.fundo}).`;
             } else {
-                textoResposta = `Em ${periodoTexto}, ${nomeFundo} gastou <strong>${formatarValor(total)}</strong> com ${meta.nome}${localTexto ? ` relacionado a "${localTexto.toLowerCase()}"` : ''} (${itens.length} empenho${itens.length === 1 ? '' : 's'}).`;
+                textoResposta = `Em ${periodoTexto}, ${nomeFundo} gastou <strong>${formatarValor(total)}</strong> com ${nomeRotuloResposta}${localTexto ? ` relacionado a "${localTexto.toLowerCase()}"` : ''} (${itens.length} empenho${itens.length === 1 ? '' : 's'}).`;
             }
-            return { texto: textoResposta, itens, titulo: meta.nome, subtitulo: `${ctx.fundo} • ${periodoTexto}` };
+            return { texto: textoResposta, itens, titulo: nomeRotuloResposta, subtitulo: `${ctx.fundo} • ${periodoTexto}` };
         }
 
         // ---- Repasses do Executivo pros fundos (mesmos dados da aba Repasses). ----
