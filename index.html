@@ -3245,21 +3245,35 @@
             // de fundo (o texto do histórico já deixa claro que é material/kit escolar, não
             // precisa depender de como o FUNDO está grafado na planilha). Por isso essas duas regras
             // agora valem pelo texto do histórico, independente do fundo.
-            if (['MERENDA', 'ALIMENTACAO ESCOLAR', 'GENERO ALIMENTICIO', 'GENEROS ALIMENTICIOS'].some(k => h.includes(k))) {
+            //
+            // Checagem por PAR de radicais (ex.: ['KIT','ESCOLAR']), não pela frase inteira: a
+            // planilha varia muito entre singular/plural ("KIT ESCOLAR" vs "KITS ESCOLARES",
+            // "UNIFORME ESCOLAR" vs "UNIFORMES ESCOLARES") e checar a frase exata perdia esses
+            // plurais — foi o caso de vários "Kits Escolares" que a Daniella viu ainda em Educação
+            // (outros). Cada radical sozinho já cobre singular/plural (h.includes('KIT') bate tanto
+            // em "KIT" quanto em "KITS"), então exigir os dois radicais juntos no mesmo texto é
+            // tão específico quanto a frase, sem perder as variações.
+            const contemRadicais = (...radicais) => radicais.every(r => h.includes(r));
+            if (contemRadicais('MERENDA') || contemRadicais('ALIMENTACAO', 'ESCOLAR') || contemRadicais('GENERO', 'ALIMENTIC')) {
                 return 'alimentacaoEscolar';
             }
             // "MOCHILA" incluída a pedido da Daniella — mochila escolar também é material escolar,
             // mesmo quando o histórico não usa literalmente as palavras "material escolar".
-            if (['MATERIAL ESCOLAR', 'MATERIAL DIDATICO', 'KIT ESCOLAR', 'UNIFORME ESCOLAR', 'LIVRO DIDATICO', 'MOCHILA'].some(k => h.includes(k))) {
+            if (contemRadicais('MATERIAL', 'ESCOLAR') || contemRadicais('MATERIAL', 'DIDATIC') || contemRadicais('KIT', 'ESCOLAR')
+                || contemRadicais('UNIFORME', 'ESCOLAR') || contemRadicais('LIVRO', 'DIDATIC') || h.includes('MOCHILA')) {
                 return 'materialEscolar';
-            }
-            if (['MERENDA', 'ESCOLAR', 'CMEI', 'CRECHE'].some(k => h.includes(k))) {
-                return 'educacao';
             }
 
             if (e.indexOf('339048') === 0 || h.includes('AUXILIO PECUNIARIO') || h.includes('RELATORIO SOCIAL')) {
                 return 'assistencia';
             }
+            // Frota/Combustível vem ANTES do catch-all genérico de Educação logo abaixo — a Daniella
+            // reportou contratos de gerenciamento de frota (ex.: "...FROTA DE VEÍCULOS DO..." e
+            // "...SISTEMA VIA WEB, COM FORNECIMENTO DE COMBUSTÍVEL...") caindo em Educação (outros)
+            // porque o texto também menciona "escolar" (frota/transporte escolar) — e antes esse
+            // catch-all de Educação vinha primeiro e "engolia" o item. Combustível/frota é um sinal
+            // bem mais específico que uma palavra solta "escolar", por isso checa primeiro.
+            //
             // Além de "combustível"/"frota" (que já cobrem a maior parte — inclusive "gerenciamento
             // de frota" e "gerenciamento de sistema via web com fornecimento de combustível"),
             // inclui também serviço de manutenção descrito sem a palavra "manutenção" (ex.: "troca
@@ -3269,6 +3283,12 @@
             const temPalavraDeManutencaoFrota = ['MANUTENCAO', 'PNEU', 'CONSERTO', 'REVISAO', 'OFICINA', 'REPARO', 'MECANICA', 'FUNILARIA', 'LATARIA', 'FILTRO', 'PECA'].some(k => h.includes(k));
             if (h.includes('COMBUSTIVEL') || h.includes('FROTA') || (temPalavraDeVeiculo && temPalavraDeManutencaoFrota)) {
                 return 'frota';
+            }
+
+            // Catch-all genérico de Educação — por último dentro do bloco de educação, só pega o
+            // que sobrou depois de tudo mais específico acima (inclusive Frota, que agora vem antes).
+            if (['MERENDA', 'ESCOLAR', 'CMEI', 'CRECHE'].some(k => h.includes(k))) {
+                return 'educacao';
             }
 
             // Catch-all por último: só pelo código do elemento orçamentário (449051), quando nada
