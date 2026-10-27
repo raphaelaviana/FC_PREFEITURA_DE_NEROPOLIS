@@ -3103,7 +3103,9 @@
             const colFundo = localizarColuna(headerNorm, ['FUNDO'], []);
             const colAno = localizarColuna(headerNorm, ['ANO'], []);
             const colElemento = localizarColuna(headerNorm, ['ELEMENTO'], []);
+            const colSubElemento = localizarColuna(headerNorm, ['SUB ELEMENTO', 'SUBELEMENTO'], []);
             const colCodigo = localizarColuna(headerNorm, ['CODIGO'], []);
+            const colFicha = localizarColuna(headerNorm, ['FICHA'], []);
             const colHistorico = localizarColuna(headerNorm, ['HISTORICO'], []);
             const colValor = localizarColuna(headerNorm, ['VALOR'], []);
 
@@ -3121,12 +3123,18 @@
                     if (!codigo) return;
                     const historico = colHistorico >= 0 ? String(row[colHistorico] || '').trim() : '';
                     const elemento = colElemento >= 0 ? String(row[colElemento] || '').trim() : '';
+                    const subElemento = colSubElemento >= 0 ? String(row[colSubElemento] || '').trim() : '';
+                    const ficha = colFicha >= 0 ? String(row[colFicha] || '').trim() : '';
                     const rec = {
                         codigo,
                         fundo: colFundo >= 0 ? String(row[colFundo] || '').trim().toUpperCase() : '',
                         ano: colAno >= 0 ? String(row[colAno] || '').trim() : '',
                         elemento,
                         elementoNorm: normalizarTexto(elemento),
+                        subElemento,
+                        subElementoNorm: normalizarTexto(subElemento),
+                        ficha,
+                        fichaNorm: normalizarTexto(ficha),
                         historico,
                         historicoNorm: normalizarTexto(historico),
                         valorEmpenhado: colValor >= 0 ? parseNumero(row[colValor]) : 0
@@ -3148,17 +3156,34 @@
         // equipamento pro cemitério, pro abrigo de animais...), não só obra/pavimentação de
         // verdade. Antes, como ele era checado logo no início, "engolia" todos esses outros
         // tópicos dentro de Obras — por isso o card de Obras tinha tanta coisa misturada.
-        function classificarTopicoEmpenho(hist) {
+        function classificarTopicoEmpenho(hist, classificacaoExtrato) {
             const h = hist.historicoNorm;
             const e = hist.elementoNorm;
             const f = hist.fundo;
 
-            // Subvenção social (elementos 14.00.55/14.00.56) — confirmado pela Daniella: isso é
-            // repasse de subvenção social a entidade, não uma despesa de festa, mesmo quando o
-            // histórico cita "festa das crianças" (era o item de ~R$ 698 mil que tinha ficado sem
-            // classificação). Por isso essa regra vem ANTES da checagem de festividades abaixo —
-            // o código do elemento manda nesse caso, não a palavra "festa" no texto.
-            if (e.indexOf('140056') === 0 || e.indexOf('140055') === 0) {
+            // Subvenção social (códigos 14.00.55/14.00.56, conforme a Daniella) — confirmado que
+            // isso é repasse de subvenção social a entidade, não uma despesa de festa, mesmo quando
+            // o histórico cita "festa das crianças" (era o item de ~R$ 698 mil que tinha ficado sem
+            // classificação) ou quando sai pelo FMDPI (ex.: Lar São Vicente). Essa regra vem ANTES
+            // da checagem de festividades abaixo — o código/a natureza da despesa manda nesse caso,
+            // não a palavra "festa" no texto.
+            //
+            // O código pode estar em qualquer um desses lugares: nas colunas ELEMENTO, SUB ELEMENTO
+            // ou FICHA da planilha de histórico de empenhos, OU na coluna "CLASSIFICAÇÃO FINAL" da
+            // planilha-extrato principal (passada aqui como classificacaoExtrato — é um campo
+            // diferente do histórico, por isso tem que vir à parte). Checa todos, já sem pontuação
+            // (pra bater tanto "140055" quanto "14.00.55"), em vez de arriscar olhar só um campo.
+            // Também aceita a combinação direta por texto ("SUBVENÇÃO SOCIAL" no histórico ou na
+            // própria classificação), que é o sinal mais direto, independente de onde o código mora.
+            const pareceCodigoSubvencaoSocial = (texto) => {
+                const limpo = String(texto || '').replace(/[^0-9]/g, '');
+                return limpo.indexOf('140055') === 0 || limpo.indexOf('140056') === 0;
+            };
+            if (h.includes('SUBVENCAO SOCIAL') || h.includes('SUBVENCOES SOCIAIS')
+                || normalizarTexto(classificacaoExtrato || '').includes('SUBVENCAO SOCIAL')
+                || pareceCodigoSubvencaoSocial(hist.elemento) || pareceCodigoSubvencaoSocial(hist.subElemento)
+                || pareceCodigoSubvencaoSocial(hist.ficha) || pareceCodigoSubvencaoSocial(hist.codigo)
+                || pareceCodigoSubvencaoSocial(classificacaoExtrato)) {
                 return 'assistencia';
             }
 
@@ -3213,16 +3238,22 @@
                 return 'saude';
             }
 
-            // Educação (FME): separado em Alimentação Escolar (merenda/gêneros alimentícios) e
-            // Material Escolar (material didático/kit/uniforme), a pedido da Daniella. Fora do
-            // FME, continua caindo no balaio geral "Educação (outros)" como antes.
-            if (f === 'FME' && ['MERENDA', 'ALIMENTACAO ESCOLAR', 'GENERO ALIMENTICIO', 'GENEROS ALIMENTICIOS'].some(k => h.includes(k))) {
+            // Educação: separado em Alimentação Escolar (merenda/gêneros alimentícios) e Material
+            // Escolar (material didático/kit/uniforme), a pedido da Daniella. Antes isso só valia
+            // quando o FUNDO da linha era exatamente "FME" — mas a Daniella reportou que itens de
+            // kit escolar continuavam caindo em "Educação (outros)", e a causa era essa restrição
+            // de fundo (o texto do histórico já deixa claro que é material/kit escolar, não
+            // precisa depender de como o FUNDO está grafado na planilha). Por isso essas duas regras
+            // agora valem pelo texto do histórico, independente do fundo.
+            if (['MERENDA', 'ALIMENTACAO ESCOLAR', 'GENERO ALIMENTICIO', 'GENEROS ALIMENTICIOS'].some(k => h.includes(k))) {
                 return 'alimentacaoEscolar';
             }
-            if (f === 'FME' && ['MATERIAL ESCOLAR', 'MATERIAL DIDATICO', 'KIT ESCOLAR', 'UNIFORME ESCOLAR', 'LIVRO DIDATICO'].some(k => h.includes(k))) {
+            // "MOCHILA" incluída a pedido da Daniella — mochila escolar também é material escolar,
+            // mesmo quando o histórico não usa literalmente as palavras "material escolar".
+            if (['MATERIAL ESCOLAR', 'MATERIAL DIDATICO', 'KIT ESCOLAR', 'UNIFORME ESCOLAR', 'LIVRO DIDATICO', 'MOCHILA'].some(k => h.includes(k))) {
                 return 'materialEscolar';
             }
-            if (['MERENDA', 'ESCOLAR', 'CMEI', 'CRECHE', 'MATERIAL ESCOLAR', 'MATERIAL DIDATICO'].some(k => h.includes(k))) {
+            if (['MERENDA', 'ESCOLAR', 'CMEI', 'CRECHE'].some(k => h.includes(k))) {
                 return 'educacao';
             }
 
@@ -3314,7 +3345,7 @@
                 const gasto = Math.abs(r.saldo);
                 totalGeral += gasto;
                 const hist = mapaHistoricoPorEmpenho.get(r.empenho);
-                const chave = hist ? (classificarTopicoEmpenho(hist) || 'naoClassificado') : 'semHistorico';
+                const chave = hist ? (classificarTopicoEmpenho(hist, r.classificacao) || 'naoClassificado') : 'semHistorico';
                 const grupo = agregados[chave];
                 grupo.total += gasto;
                 const existente = grupo.itens.get(r.empenho);
@@ -3373,7 +3404,12 @@
             { padrao: 'FESTA DA PADROEIRA', nome: 'Festa da Padroeira' },
             { padrao: 'IMACULADO CORACAO DE MARIA', nome: 'Festa do Imaculado Coração de Maria' },
             { padrao: 'CONFRATERNIZACAO', nome: 'Festa de Confraternização' },
-            { padrao: 'CRIANCAS', nome: 'Festa das Crianças' },
+            // "CRIANCAS" ("Festa das Crianças") foi removido daqui a pedido da Daniella: o item de
+            // ~R$ 698 mil que citava isso no histórico não é uma festa, é repasse de subvenção
+            // social (ver classificarTopicoEmpenho) — rotulá-lo como "Festa das Crianças" dentro de
+            // Assistência Social confundia. Sem esse apelido, o rótulo cai no recorte genérico do
+            // texto do histórico (geralmente o nome da entidade beneficiada), que é mais correto
+            // pra esse tipo de despesa.
             // Réveillon e Carnaval às vezes saem num único contrato (ex.: termo de colaboração
             // cobrindo "RÉVEILLON 2025/2026 E CARNAVAL 2026" de uma vez) — na prática esse tipo de
             // contrato é sempre a virada do ano (Réveillon), mesmo mencionando Carnaval de
@@ -4337,7 +4373,7 @@
                 if (ctx.mesIdx !== null && r.mesIdx !== ctx.mesIdx) return;
                 if (!fundoCorresponde(r.fundo, ctx.fundo)) return;
                 const hist = mapaHistoricoPorEmpenho.get(r.empenho);
-                const chave = hist ? (classificarTopicoEmpenho(hist) || 'naoClassificado') : 'semHistorico';
+                const chave = hist ? (classificarTopicoEmpenho(hist, r.classificacao) || 'naoClassificado') : 'semHistorico';
                 if (chave !== chaveEncontrada) return;
                 if (subgrupoObrasFiltro && (!hist || classificarSubgrupoObras(hist.historico) !== subgrupoObrasFiltro)) return;
                 if (localExtra.length > 0 && !(hist && localExtra.every(p => hist.historicoNorm.includes(p)))) return;
