@@ -950,6 +950,18 @@
             const colFornecedor = localizarColuna(headerNorm, ['FORNECEDOR'], []);
             const colEmpenho = localizarColuna(headerNorm, ['EMPENHO'], []);
             const colCodigo = localizarColuna(headerNorm, ['CODIGO'], []);
+            // FONTE: a Daniella avisou que "gasto com verba livre" da Saúde estava errado (valor
+            // muito alto) — o pressuposto antigo (comentário acima, "toda a coluna FONTE = 100") não
+            // vale mais. Cada fundo tem seu próprio grupo de fontes válidas (ver
+            // FONTES_VERBA_LIVRE_POR_FUNDO/pareceFonteVerbaLivre, usado em agregarFundoRepasse).
+            // Captura a coluna aqui pra poder filtrar lá.
+            const colFonte = localizarColuna(headerNorm, ['FONTE'], []);
+            if (colFonte < 0) {
+                const msg = `Não encontrei a coluna FONTE na planilha de ordem de pagamento de ${fundo} — "gasto com verba livre" vai somar TODAS as linhas desse fundo (sem filtrar por fonte), o que pode estar errado.`;
+                console.warn(msg);
+                errosCarregamentoFinanceiro.push(msg);
+                atualizarStatusCarregamentoFinanceiro();
+            }
 
             if (colValor < 0 || colMes < 0) {
                 const msg = `Não encontrei as colunas VALOR e/ou MÊS na planilha de ordem de pagamento de ${fundo}.`;
@@ -973,7 +985,8 @@
                     valor,
                     fornecedor: colFornecedor >= 0 ? String(row[colFornecedor] || '').trim() : '',
                     empenho: colEmpenho >= 0 ? String(row[colEmpenho] || '').trim() : '',
-                    codigo: colCodigo >= 0 ? String(row[colCodigo] || '').trim() : ''
+                    codigo: colCodigo >= 0 ? String(row[colCodigo] || '').trim() : '',
+                    fonte: colFonte >= 0 ? String(row[colFonte] || '').trim() : null
                 });
             });
 
@@ -3064,11 +3077,16 @@
             { chave: 'obras', nome: 'Obras e Infraestrutura', icone: 'hard-hat', badge: 'bg-orange-50 text-orange-700' },
             { chave: 'iluminacao', nome: 'Iluminação Pública', icone: 'lightbulb', badge: 'bg-amber-50 text-amber-700' },
             { chave: 'saude', nome: 'Saúde (medicamentos, cirurgias, exames)', icone: 'heart-pulse', badge: 'bg-rose-50 text-rose-700' },
-            { chave: 'alimentacaoEscolar', nome: 'Alimentação Escolar (FME)', icone: 'utensils', badge: 'bg-emerald-50 text-emerald-700' },
-            { chave: 'materialEscolar', nome: 'Material Escolar (FME)', icone: 'backpack', badge: 'bg-sky-50 text-sky-700' },
+            { chave: 'alimentacaoEscolar', nome: 'Alimentação', icone: 'utensils', badge: 'bg-emerald-50 text-emerald-700' },
+            { chave: 'materialEscolar', nome: 'Material Escolar', icone: 'backpack', badge: 'bg-sky-50 text-sky-700' },
             { chave: 'educacao', nome: 'Educação (outros)', icone: 'graduation-cap', badge: 'bg-blue-50 text-blue-700' },
             { chave: 'assistencia', nome: 'Assistência Social', icone: 'heart-handshake', badge: 'bg-teal-50 text-teal-700' },
-            { chave: 'frota', nome: 'Frota e Combustível', icone: 'fuel', badge: 'bg-cyan-50 text-cyan-700' }
+            { chave: 'frota', nome: 'Frota e Combustível', icone: 'fuel', badge: 'bg-cyan-50 text-cyan-700' },
+            // Folha de pagamento — pedido da Daniella: um tópico à parte pra vencimentos/pessoal
+            // (antes esses itens ficavam perdidos dentro de Educação ou de outros tópicos, só por
+            // coincidência de alguma palavra do histórico bater). Nível 2 separa por secretaria
+            // (ver extrairSecretariaFolha), igual ela pediu.
+            { chave: 'folha', nome: 'Folha de Pagamento', icone: 'users', badge: 'bg-violet-50 text-violet-700' }
         ];
         const META_NAO_CLASSIFICADO = { chave: 'naoClassificado', nome: 'Não classificado', icone: 'help-circle', badge: 'bg-slate-100 text-slate-500' };
 
@@ -3185,6 +3203,23 @@
                 || pareceCodigoSubvencaoSocial(hist.ficha) || pareceCodigoSubvencaoSocial(hist.codigo)
                 || pareceCodigoSubvencaoSocial(classificacaoExtrato)) {
                 return 'assistencia';
+            }
+
+            // Folha de pagamento — pedido da Daniella: tópico à parte pra vencimentos/pessoal, com
+            // nível 2 por secretaria. Confere tanto o código do elemento orçamentário (319 = Pessoal
+            // Civil, 339034 = terceirização de mão de obra, 339004 = contratação por tempo
+            // determinado — a mesma família de códigos já usada em ehElementoPessoal, calculada logo
+            // abaixo também pra esses casos) quanto palavras do próprio histórico (ex.: "Despesa com
+            // Vencimentos", que foi o item que a Daniella viu preso em Educação por acaso mencionar
+            // "escolar"). Vem bem no início da função — elemento de pessoal é pessoal independente
+            // de qualquer outra palavra que apareça no texto (ex.: nome da secretaria).
+            const ehCodigoElementoPessoal = (texto) => {
+                const limpo = normalizarTexto(texto || '');
+                return limpo.indexOf('319') === 0 || limpo.indexOf('339034') === 0 || limpo.indexOf('339004') === 0;
+            };
+            if (ehCodigoElementoPessoal(hist.elemento) || ehCodigoElementoPessoal(classificacaoExtrato)
+                || ['VENCIMENTO', 'SALARIO', 'FOLHA DE PAGAMENTO', 'DECIMO TERCEIRO', 'FERIAS', 'PENSAO', 'APOSENTADORIA', 'ENCARGO PATRONAL', 'ENCARGOS PATRONAIS'].some(k => h.includes(k))) {
+                return 'folha';
             }
 
             // ANIVERSARIO/FESTIVIDADE/ROCK FEST/NORDESTINO foram incluídos porque vários empenhos
@@ -3642,6 +3677,30 @@
             return paraCasoDeTitulo(limitarTamanho(nucleo, 70));
         }
 
+        // Rótulo específico para Folha de Pagamento: tenta achar a secretaria dona da despesa de
+        // pessoal (pedido da Daniella: "no tópico de folha, separa por secretaria"). O texto desse
+        // tipo de histórico costuma seguir o padrão "...VENCIMENTOS DE SERVIDORES DA SECRETARIA
+        // (MUNICIPAL) DE X..." — tenta esse padrão primeiro; se não achar, cai em alguns órgãos
+        // comuns que não usam a palavra "Secretaria" (Gabinete, Câmara, Procuradoria, RPPS) antes
+        // de desistir e usar o recorte genérico (extrairRotuloGasto) como último recurso.
+        function extrairSecretariaFolha(historicoOriginal) {
+            const historico = String(historicoOriginal || '');
+            const m = historico.match(/SECRETARIA(?:\s+MUNICIPAL)?\s+DE\s+([\s\S]+)/i);
+            if (m) {
+                let resto = m[1];
+                const posCorte = encontrarMarcador(resto, MARCADORES_CORTE, 0);
+                if (posCorte >= 0) resto = resto.slice(0, posCorte);
+                resto = resto.trim().replace(/^["',.;:\-]+/, '').replace(/["',.;:\-]+$/, '').trim();
+                if (resto.length >= 3) return 'Secretaria de ' + paraCasoDeTitulo(limitarTamanho(resto, 50));
+            }
+            const normalizado = normalizarTexto(historico);
+            if (normalizado.includes('GABINETE')) return 'Gabinete do Prefeito';
+            if (normalizado.includes('CAMARA MUNICIPAL') || normalizado.includes('PODER LEGISLATIVO')) return 'Câmara Municipal';
+            if (normalizado.includes('PROCURADORIA')) return 'Procuradoria';
+            if (normalizado.includes('RPPS') || normalizado.includes('PENSOES') || normalizado.includes('PENSAO') || normalizado.includes('APOSENTADORIA')) return 'RPPS (Aposentadorias e Pensões)';
+            return extrairRotuloGasto(historicoOriginal);
+        }
+
         // Dentro de Frota/Combustível, separa o que é abastecimento (combustível) do que é
         // peça/serviço de manutenção — checa manutenção primeiro porque um histórico como "filtro
         // de combustível" ou "filtro de óleo" é peça de manutenção, não abastecimento, mesmo
@@ -3776,10 +3835,11 @@
         function abrirPainelTopico(chave) {
             const meta = TOPICOS_GASTO.find(t => t.chave === chave) || META_NAO_CLASSIFICADO;
             const grupo = ultimoAgregadoTopicos ? (ultimoAgregadoTopicos[chave] || ultimoAgregadoTopicos.semHistorico) : null;
-            // Saúde é agrupado por categoria ampla (medicamentos, óculos, exames, cirurgia); os
-            // demais tópicos (exceto Frota, que tem sua própria navegação em 3 níveis logo abaixo),
-            // por obra/evento — uma linha resumida por grupo, sem número de empenho.
-            const funcaoRotulo = chave === 'saude' ? extrairRotuloSaude : extrairRotuloGasto;
+            // Saúde é agrupado por categoria ampla (medicamentos, óculos, exames, cirurgia); Folha
+            // de Pagamento por secretaria (pedido da Daniella); os demais tópicos (exceto Frota, que
+            // tem sua própria navegação em 3 níveis logo abaixo), por obra/evento — uma linha
+            // resumida por grupo, sem número de empenho.
+            const funcaoRotulo = chave === 'saude' ? extrairRotuloSaude : (chave === 'folha' ? extrairSecretariaFolha : extrairRotuloGasto);
             topicoPainelAtual = { chave, meta, grupo, funcaoRotulo };
 
             document.getElementById('painelTitulo').textContent = meta.nome;
@@ -3988,6 +4048,18 @@
             return { receita, repasses, despesasProprias, saida, saldo };
         }
 
+        // Fontes que contam como "verba livre" na ordem de pagamento — mesma lista pra qualquer
+        // fundo (FMS/FME/FMAS/FMDPI/FMMA): a Daniella confirmou que pra essa análise de Repasses
+        // só importam as fontes 100/101/102/200/201/202/300/301/302; qualquer outra fonte (ex.: 337,
+        // 381, 709, 710, 702, 850, etc., que apareceram nas planilhas reais) não entra na soma de
+        // "gasto com verba livre", independente de qual fundo for.
+        const FONTES_VERBA_LIVRE = [100, 101, 102, 200, 201, 202, 300, 301, 302];
+        function pareceFonteVerbaLivre(fonteBruta, fundo) {
+            const limpo = String(fonteBruta || '').replace(/[^0-9]/g, '');
+            if (!limpo) return false;
+            return FONTES_VERBA_LIVRE.includes(parseInt(limpo, 10));
+        }
+
         function agregarFundoRepasse(fundo) {
             const recebido = Array(12).fill(0);
             const gasto = Array(12).fill(0);
@@ -4001,6 +4073,10 @@
 
             registrosOrdensPagamento.forEach(r => {
                 if (r.fundo !== fundo) return;
+                // r.fonte === null significa que a planilha desse fundo não tem coluna FONTE (avisado
+                // em errosCarregamentoFinanceiro) — nesse caso não dá pra filtrar, soma tudo como
+                // antes. Quando a coluna existe, só conta a(s) fonte(s) correta(s) desse fundo.
+                if (r.fonte !== null && !pareceFonteVerbaLivre(r.fonte, fundo)) return;
                 gasto[r.mesIdx] -= r.valor;
             });
 
@@ -4022,11 +4098,22 @@
             return mapa;
         }
 
+        // Mesmo filtro de fonte usado em agregarFundoRepasse, aplicado aqui pro detalhamento (por
+        // TCM / por fornecedor) bater com o total mostrado na linha "Gasto com verba livre" — senão
+        // o detalhe abriria com itens de fonte que nem entraram na soma. Só vale pra fundo (FMAS/
+        // FMDPI/FME/FMMA/FMS); o Executivo tem sua própria linha "Despesas próprias (verba livre)",
+        // que é fonte 100 por definição (outro contexto, a Daniella não pediu filtro ali).
+        function passaFiltroFonteVerbaLivre(r, fundo) {
+            if (fundo === 'EXECUTIVO') return true;
+            if (r.fonte === null) return true; // planilha sem coluna FONTE: não dá pra filtrar, inclui tudo (mesmo comportamento de antes)
+            return pareceFonteVerbaLivre(r.fonte, fundo);
+        }
+
         function agruparOrdemPagamentoPorTcm(fundo, mesIdx) {
             const indiceTcm = construirIndiceTcmPorEmpenho();
             const mapa = new Map();
             registrosOrdensPagamento
-                .filter(r => r.fundo === fundo && r.mesIdx === mesIdx)
+                .filter(r => r.fundo === fundo && r.mesIdx === mesIdx && passaFiltroFonteVerbaLivre(r, fundo))
                 .forEach(it => {
                     const tcm = (indiceTcm.get(`${fundo}|${it.empenho}`) || '').trim() || 'NÃO CLASSIFICADO';
                     mapa.set(tcm, (mapa.get(tcm) || 0) + it.valor);
@@ -4038,7 +4125,7 @@
             const indiceTcm = construirIndiceTcmPorEmpenho();
             const mapa = new Map();
             registrosOrdensPagamento
-                .filter(r => r.fundo === fundo && r.mesIdx === mesIdx)
+                .filter(r => r.fundo === fundo && r.mesIdx === mesIdx && passaFiltroFonteVerbaLivre(r, fundo))
                 .filter(r => ((indiceTcm.get(`${fundo}|${r.empenho}`) || '').trim() || 'NÃO CLASSIFICADO') === tcm)
                 .forEach(it => {
                     const nome = it.fornecedor || 'NÃO IDENTIFICADO';
@@ -4345,13 +4432,14 @@
             const sinonimosTopico = {
                 obras: ['OBRA', 'OBRAS', 'INFRAESTRUTURA', 'CONSTRUCAO', 'REFORMA'],
                 saude: ['SAUDE', 'HOSPITAL', 'REMEDIO', 'REMEDIOS', 'MEDICAMENTO', 'MEDICAMENTOS', 'CIRURGIA'],
-                alimentacaoEscolar: ['ALIMENTACAO ESCOLAR', 'MERENDA'],
-                materialEscolar: ['MATERIAL ESCOLAR', 'MATERIAL DIDATICO', 'KIT ESCOLAR', 'UNIFORME ESCOLAR'],
+                alimentacaoEscolar: ['ALIMENTACAO ESCOLAR', 'ALIMENTACAO', 'MERENDA'],
+                materialEscolar: ['MATERIAL ESCOLAR', 'MATERIAL DIDATICO', 'KIT ESCOLAR', 'KITS ESCOLARES', 'UNIFORME ESCOLAR', 'MOCHILA', 'MOCHILAS'],
                 educacao: ['EDUCACAO', 'ESCOLA', 'ESCOLAR', 'CRECHE', 'CMEI'],
                 assistencia: ['ASSISTENCIA SOCIAL', 'ASSISTENCIA'],
                 frota: ['FROTA', 'COMBUSTIVEL', 'VEICULO', 'VEICULOS', 'CARRO', 'CARROS', 'ONIBUS', 'CAMINHAO'],
                 festividades: ['FESTA', 'FESTIVIDADE', 'FESTIVIDADES', 'EVENTO', 'EVENTOS'],
-                iluminacao: ['ILUMINACAO']
+                iluminacao: ['ILUMINACAO'],
+                folha: ['FOLHA DE PAGAMENTO', 'FOLHA', 'VENCIMENTO', 'VENCIMENTOS', 'SALARIO', 'SALARIOS', 'PESSOAL']
             };
             // Tapa Buraco, Cemitério, Abrigo de Animais, Secretaria de Desenvolvimento e Parque
             // Agropecuário são SUBGRUPOS do tópico "obras" (não tópicos à parte — a Daniella pediu
